@@ -36,10 +36,36 @@ CREATE TABLE public.sessions (
   updated_at TIMESTAMPTZ DEFAULT now()
 );
 
+-- Decks table (memory card decks)
+CREATE TABLE public.decks (
+  id UUID PRIMARY KEY,
+  user_id UUID NOT NULL REFERENCES public.profiles(id) ON DELETE CASCADE,
+  name TEXT NOT NULL,
+  created_at TIMESTAMPTZ NOT NULL,
+  updated_at TIMESTAMPTZ DEFAULT now(),
+  deleted_at TIMESTAMPTZ
+);
+
+-- Cards table (memory cards with Ebbinghaus spaced repetition)
+CREATE TABLE public.cards (
+  id UUID PRIMARY KEY,
+  user_id UUID NOT NULL REFERENCES public.profiles(id) ON DELETE CASCADE,
+  deck_id UUID NOT NULL,
+  front TEXT NOT NULL,
+  back TEXT NOT NULL,
+  review_stage INTEGER DEFAULT 0,
+  next_review_at TEXT NOT NULL,
+  created_at TIMESTAMPTZ NOT NULL,
+  updated_at TIMESTAMPTZ DEFAULT now(),
+  deleted_at TIMESTAMPTZ
+);
+
 -- Enable RLS
 ALTER TABLE public.profiles ENABLE ROW LEVEL SECURITY;
 ALTER TABLE public.habits ENABLE ROW LEVEL SECURITY;
 ALTER TABLE public.sessions ENABLE ROW LEVEL SECURITY;
+ALTER TABLE public.decks ENABLE ROW LEVEL SECURITY;
+ALTER TABLE public.cards ENABLE ROW LEVEL SECURITY;
 
 -- RLS policies
 CREATE POLICY "Users manage own profile" ON public.profiles
@@ -51,9 +77,18 @@ CREATE POLICY "Users manage own habits" ON public.habits
 CREATE POLICY "Users manage own sessions" ON public.sessions
   FOR ALL USING (auth.uid() = user_id);
 
+CREATE POLICY "Users manage own decks" ON public.decks
+  FOR ALL USING (auth.uid() = user_id);
+
+CREATE POLICY "Users manage own cards" ON public.cards
+  FOR ALL USING (auth.uid() = user_id);
+
 -- Indexes
 CREATE INDEX idx_habits_user_updated ON public.habits(user_id, updated_at);
 CREATE INDEX idx_sessions_user_updated ON public.sessions(user_id, updated_at);
+CREATE INDEX idx_decks_user_updated ON public.decks(user_id, updated_at);
+CREATE INDEX idx_cards_user_updated ON public.cards(user_id, updated_at);
+CREATE INDEX idx_cards_deck ON public.cards(deck_id);
 
 -- Auto-update updated_at
 CREATE OR REPLACE FUNCTION update_updated_at()
@@ -68,6 +103,12 @@ CREATE TRIGGER habits_updated_at BEFORE UPDATE ON public.habits
   FOR EACH ROW EXECUTE FUNCTION update_updated_at();
 
 CREATE TRIGGER sessions_updated_at BEFORE UPDATE ON public.sessions
+  FOR EACH ROW EXECUTE FUNCTION update_updated_at();
+
+CREATE TRIGGER decks_updated_at BEFORE UPDATE ON public.decks
+  FOR EACH ROW EXECUTE FUNCTION update_updated_at();
+
+CREATE TRIGGER cards_updated_at BEFORE UPDATE ON public.cards
   FOR EACH ROW EXECUTE FUNCTION update_updated_at();
 
 -- Auto-create profile on sign up

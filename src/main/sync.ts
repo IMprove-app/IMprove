@@ -4,7 +4,9 @@ import {
   loadStore as getStore,
   saveStore,
   HabitRow,
-  SessionRow
+  SessionRow,
+  DeckRow,
+  CardRow
 } from './db'
 
 export type SyncState = 'idle' | 'syncing' | 'error' | 'offline'
@@ -160,8 +162,116 @@ export async function runSync(): Promise<void> {
       }
     }
 
+    // First-time full push for decks/cards (added after initial release).
+    // Bypass `since` filter so pre-existing local data gets uploaded once.
+    const cardsFirstSync = !store.sync_meta.cards_synced_once
+    const cardsSince = cardsFirstSync ? null : since
+
+    // ========== Decks PUSH ==========
+    const localDecks = store.decks.filter(
+      d => !cardsSince || (d.updated_at && d.updated_at > cardsSince)
+    )
+    if (localDecks.length > 0) {
+      const rows = localDecks.map(d => ({
+        id: d.id,
+        user_id: userId,
+        name: d.name,
+        created_at: d.created_at,
+        updated_at: d.updated_at || d.created_at,
+        deleted_at: d.deleted_at || null
+      }))
+      await sb.from('decks').upsert(rows, { onConflict: 'id' })
+    }
+
+    // ========== Cards PUSH ==========
+    const localCards = store.cards.filter(
+      c => !cardsSince || (c.updated_at && c.updated_at > cardsSince)
+    )
+    if (localCards.length > 0) {
+      const rows = localCards.map(c => ({
+        id: c.id,
+        user_id: userId,
+        deck_id: c.deck_id,
+        front: c.front,
+        back: c.back,
+        review_stage: c.review_stage,
+        next_review_at: c.next_review_at,
+        created_at: c.created_at,
+        updated_at: c.updated_at || c.created_at,
+        deleted_at: c.deleted_at || null
+      }))
+      await sb.from('cards').upsert(rows, { onConflict: 'id' })
+    }
+
+    // ========== Decks PULL ==========
+    let decksQuery = sb.from('decks').select('*').eq('user_id', userId)
+    if (since) {
+      decksQuery = decksQuery.gt('updated_at', since)
+    }
+    const { data: remoteDecks } = await decksQuery
+
+    if (remoteDecks && remoteDecks.length > 0) {
+      for (const remote of remoteDecks) {
+        const localIdx = store.decks.findIndex(d => d.id === remote.id)
+        const remoteRow: DeckRow = {
+          id: remote.id,
+          name: remote.name,
+          created_at: remote.created_at,
+          updated_at: remote.updated_at,
+          deleted_at: remote.deleted_at || undefined
+        }
+
+        if (localIdx === -1) {
+          store.decks.push(remoteRow)
+        } else {
+          const local = store.decks[localIdx]
+          const localTime = local.updated_at || local.created_at
+          const remoteTime = remote.updated_at || remote.created_at
+          if (remoteTime > localTime) {
+            store.decks[localIdx] = remoteRow
+          }
+        }
+      }
+    }
+
+    // ========== Cards PULL ==========
+    let cardsQuery = sb.from('cards').select('*').eq('user_id', userId)
+    if (since) {
+      cardsQuery = cardsQuery.gt('updated_at', since)
+    }
+    const { data: remoteCards } = await cardsQuery
+
+    if (remoteCards && remoteCards.length > 0) {
+      for (const remote of remoteCards) {
+        const localIdx = store.cards.findIndex(c => c.id === remote.id)
+        const remoteRow: CardRow = {
+          id: remote.id,
+          deck_id: remote.deck_id,
+          front: remote.front,
+          back: remote.back,
+          review_stage: remote.review_stage,
+          next_review_at: remote.next_review_at,
+          created_at: remote.created_at,
+          updated_at: remote.updated_at,
+          deleted_at: remote.deleted_at || undefined
+        }
+
+        if (localIdx === -1) {
+          store.cards.push(remoteRow)
+        } else {
+          const local = store.cards[localIdx]
+          const localTime = local.updated_at || local.created_at
+          const remoteTime = remote.updated_at || remote.created_at
+          if (remoteTime > localTime) {
+            store.cards[localIdx] = remoteRow
+          }
+        }
+      }
+    }
+
     // Update sync timestamp
     store.sync_meta.last_sync_at = new Date().toISOString()
+    store.sync_meta.cards_synced_once = true
     lastSyncAt = store.sync_meta.last_sync_at
     saveStore()
 

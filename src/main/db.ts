@@ -32,6 +32,7 @@ export interface SessionRow {
 interface SyncMeta {
   last_sync_at: string | null
   user_id: string | null
+  cards_synced_once?: boolean
 }
 
 export interface DeckRow {
