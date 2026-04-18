@@ -60,12 +60,28 @@ CREATE TABLE public.cards (
   deleted_at TIMESTAMPTZ
 );
 
+-- Todos table (待办事项)
+CREATE TABLE public.todos (
+  id UUID PRIMARY KEY,
+  user_id UUID NOT NULL REFERENCES public.profiles(id) ON DELETE CASCADE,
+  title TEXT NOT NULL,
+  notes TEXT NOT NULL DEFAULT '',
+  due_date TEXT NOT NULL,
+  is_done INTEGER NOT NULL DEFAULT 0,
+  completed_at TIMESTAMPTZ,
+  sort_order INTEGER NOT NULL DEFAULT 0,
+  created_at TIMESTAMPTZ NOT NULL,
+  updated_at TIMESTAMPTZ DEFAULT now(),
+  deleted_at TIMESTAMPTZ
+);
+
 -- Enable RLS
 ALTER TABLE public.profiles ENABLE ROW LEVEL SECURITY;
 ALTER TABLE public.habits ENABLE ROW LEVEL SECURITY;
 ALTER TABLE public.sessions ENABLE ROW LEVEL SECURITY;
 ALTER TABLE public.decks ENABLE ROW LEVEL SECURITY;
 ALTER TABLE public.cards ENABLE ROW LEVEL SECURITY;
+ALTER TABLE public.todos ENABLE ROW LEVEL SECURITY;
 
 -- RLS policies
 CREATE POLICY "Users manage own profile" ON public.profiles
@@ -83,12 +99,17 @@ CREATE POLICY "Users manage own decks" ON public.decks
 CREATE POLICY "Users manage own cards" ON public.cards
   FOR ALL USING (auth.uid() = user_id);
 
+CREATE POLICY "Users manage own todos" ON public.todos
+  FOR ALL USING (auth.uid() = user_id);
+
 -- Indexes
 CREATE INDEX idx_habits_user_updated ON public.habits(user_id, updated_at);
 CREATE INDEX idx_sessions_user_updated ON public.sessions(user_id, updated_at);
 CREATE INDEX idx_decks_user_updated ON public.decks(user_id, updated_at);
 CREATE INDEX idx_cards_user_updated ON public.cards(user_id, updated_at);
 CREATE INDEX idx_cards_deck ON public.cards(deck_id);
+CREATE INDEX idx_todos_user_updated ON public.todos(user_id, updated_at);
+CREATE INDEX idx_todos_user_due_date ON public.todos(user_id, due_date);
 
 -- Auto-update updated_at
 CREATE OR REPLACE FUNCTION update_updated_at()
@@ -109,6 +130,9 @@ CREATE TRIGGER decks_updated_at BEFORE UPDATE ON public.decks
   FOR EACH ROW EXECUTE FUNCTION update_updated_at();
 
 CREATE TRIGGER cards_updated_at BEFORE UPDATE ON public.cards
+  FOR EACH ROW EXECUTE FUNCTION update_updated_at();
+
+CREATE TRIGGER todos_updated_at BEFORE UPDATE ON public.todos
   FOR EACH ROW EXECUTE FUNCTION update_updated_at();
 
 -- Auto-create profile on sign up

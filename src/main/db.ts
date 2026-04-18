@@ -33,6 +33,7 @@ interface SyncMeta {
   last_sync_at: string | null
   user_id: string | null
   cards_synced_once?: boolean
+  todos_synced_once?: boolean
 }
 
 export interface DeckRow {
@@ -55,6 +56,19 @@ export interface CardRow {
   deleted_at?: string
 }
 
+export interface TodoRow {
+  id: string
+  title: string
+  notes: string
+  due_date: string
+  is_done: number
+  completed_at?: string
+  sort_order: number
+  created_at: string
+  updated_at?: string
+  deleted_at?: string
+}
+
 // Ebbinghaus intervals in days: stage -> days until next review
 const EBBINGHAUS_INTERVALS = [0, 1, 2, 4, 7, 15, 30]
 
@@ -63,6 +77,7 @@ interface StoreData {
   sessions: SessionRow[]
   decks: DeckRow[]
   cards: CardRow[]
+  todos: TodoRow[]
   sync_meta?: SyncMeta
 }
 
@@ -82,7 +97,7 @@ function getDataPath(): string {
 export function loadStore(): StoreData {
   if (store) return store
   const filePath = getDataPath()
-  const empty: StoreData = { habits: [], sessions: [], decks: [], cards: [], sync_meta: { last_sync_at: null, user_id: null } }
+  const empty: StoreData = { habits: [], sessions: [], decks: [], cards: [], todos: [], sync_meta: { last_sync_at: null, user_id: null } }
   if (fs.existsSync(filePath)) {
     try {
       store = JSON.parse(fs.readFileSync(filePath, 'utf-8'))
@@ -99,6 +114,7 @@ export function loadStore(): StoreData {
       // Migrate: add decks/cards arrays if missing
       if (!store.decks) store.decks = []
       if (!store.cards) store.cards = []
+      if (!store.todos) store.todos = []
     } catch {
       store = empty
     }
@@ -443,6 +459,62 @@ export function reviewCardForgot(id: string): void {
     updated_at: now
   }
   saveStore()
+}
+
+// ============ Todos CRUD ============
+
+export function getAllTodos(): TodoRow[] {
+  const s = loadStore()
+  return s.todos
+    .filter(t => !t.deleted_at)
+    .sort((a, b) => {
+      if (a.due_date !== b.due_date) return a.due_date < b.due_date ? -1 : 1
+      return a.sort_order - b.sort_order
+    })
+}
+
+export function createTodo(todo: {
+  id: string
+  title: string
+  notes?: string
+  due_date: string
+  sort_order?: number
+}): TodoRow {
+  const s = loadStore()
+  const now = new Date().toISOString()
+  const row: TodoRow = {
+    id: todo.id,
+    title: todo.title,
+    notes: todo.notes || '',
+    due_date: todo.due_date,
+    is_done: 0,
+    sort_order: todo.sort_order ?? 0,
+    created_at: now,
+    updated_at: now
+  }
+  s.todos.push(row)
+  saveStore()
+  return row
+}
+
+export function updateTodo(id: string, updates: Partial<TodoRow>): TodoRow | undefined {
+  const s = loadStore()
+  const idx = s.todos.findIndex(t => t.id === id)
+  if (idx === -1) return undefined
+  s.todos[idx] = { ...s.todos[idx], ...updates, id, updated_at: new Date().toISOString() }
+  saveStore()
+  return s.todos[idx]
+}
+
+export function deleteTodo(id: string): void {
+  const s = loadStore()
+  const idx = s.todos.findIndex(t => t.id === id)
+  if (idx !== -1) {
+    const now = new Date().toISOString()
+    s.todos[idx].deleted_at = now
+    s.todos[idx].updated_at = now
+    saveStore()
+  }
 }
 
 export function closeDb(): void {

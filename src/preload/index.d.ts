@@ -53,6 +53,19 @@ interface CardData {
   updated_at?: string
 }
 
+interface TodoData {
+  id: string
+  title: string
+  notes: string
+  due_date: string
+  is_done: number
+  completed_at?: string
+  sort_order: number
+  created_at: string
+  updated_at?: string
+  deleted_at?: string
+}
+
 interface SyncStatusPayload {
   state: 'idle' | 'syncing' | 'error' | 'offline'
   lastSync: string | null
@@ -87,6 +100,12 @@ interface API {
   getDueCardCount(): Promise<number>
   reviewRemembered(cardId: string): Promise<{ ok: boolean }>
   reviewForgot(cardId: string): Promise<{ ok: boolean }>
+
+  // Todos
+  listTodos(): Promise<TodoData[]>
+  createTodo(data: { title: string; notes?: string; due_date: string; sort_order?: number }): Promise<TodoData>
+  updateTodo(id: string, updates: Record<string, unknown>): Promise<TodoData>
+  deleteTodo(id: string): Promise<{ ok: boolean }>
 
   // Auth
   login(email: string, password: string): Promise<AuthResult>

@@ -24,7 +24,12 @@ import {
   getDueCardCount,
   reviewCardRemembered,
   reviewCardForgot,
-  HabitRow
+  getAllTodos,
+  createTodo,
+  updateTodo,
+  deleteTodo,
+  HabitRow,
+  TodoRow
 } from './db'
 import { signUp, signIn, signOut, getAuthStatus } from './supabase'
 import { runSync, getSyncStatus } from './sync'
@@ -188,6 +193,30 @@ export function registerIpcHandlers(): void {
 
   ipcMain.handle('review:forgot', (_e, cardId: string) => {
     reviewCardForgot(cardId)
+    return { ok: true }
+  })
+
+  // ====== Todos ======
+  ipcMain.handle('todos:list', () => {
+    return getAllTodos()
+  })
+
+  ipcMain.handle('todos:create', (_e, data: { title: string; notes?: string; due_date: string; sort_order?: number }) => {
+    return createTodo({
+      id: uuidv4(),
+      title: data.title,
+      notes: data.notes,
+      due_date: data.due_date,
+      sort_order: data.sort_order
+    })
+  })
+
+  ipcMain.handle('todos:update', (_e, id: string, updates: Partial<TodoRow>) => {
+    return updateTodo(id, updates)
+  })
+
+  ipcMain.handle('todos:delete', (_e, id: string) => {
+    deleteTodo(id)
     return { ok: true }
   })
 

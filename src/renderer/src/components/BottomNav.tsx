@@ -1,6 +1,6 @@
 interface Props {
-  active: 'dashboard' | 'cards' | 'stats'
-  onChange: (tab: 'dashboard' | 'cards' | 'stats') => void
+  active: 'dashboard' | 'cards' | 'todos' | 'stats'
+  onChange: (tab: 'dashboard' | 'cards' | 'todos' | 'stats') => void
   dueCount?: number
   timerActive?: boolean
 }
@@ -55,6 +55,23 @@ function BottomNav({ active, onChange, dueCount, timerActive }: Props): JSX.Elem
         </div>
         <span className="text-[10px] font-medium">卡片</span>
         {active === 'cards' && (
+          <div className="w-1 h-1 rounded-full bg-accent-cyan shadow-[0_0_6px_rgba(0,229,255,0.5)]" />
+        )}
+      </button>
+
+      <button
+        onClick={() => !timerActive && onChange('todos')}
+        className={`flex flex-col items-center gap-0.5 px-4 py-1 rounded-lg transition-all ${
+          timerActive ? 'text-txt-muted/40 cursor-not-allowed' :
+          active === 'todos' ? 'text-accent-cyan' : 'text-txt-muted hover:text-txt-secondary'
+        }`}
+      >
+        <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+          <polyline points="9 11 12 14 20 6" />
+          <path d="M20 12v7a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V6a2 2 0 0 1 2-2h10" />
+        </svg>
+        <span className="text-[10px] font-medium">待办</span>
+        {active === 'todos' && (
           <div className="w-1 h-1 rounded-full bg-accent-cyan shadow-[0_0_6px_rgba(0,229,255,0.5)]" />
         )}
       </button>

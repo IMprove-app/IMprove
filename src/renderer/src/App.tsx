@@ -8,6 +8,7 @@ import Stats from './pages/Stats'
 import Settings from './pages/Settings'
 import Auth from './pages/Auth'
 import CardsPage from './pages/CardsPage'
+import TodosPage from './pages/TodosPage'
 import PostSessionCards from './components/PostSessionCards'
 import UpdateBanner from './components/UpdateBanner'
 
@@ -24,7 +25,7 @@ export interface ActiveSession {
 function App(): JSX.Element {
   const [activeSession, setActiveSession] = useState<ActiveSession | null>(null)
   const [refreshKey, setRefreshKey] = useState(0)
-  const [tab, setTab] = useState<'dashboard' | 'cards' | 'stats'>('dashboard')
+  const [tab, setTab] = useState<'dashboard' | 'cards' | 'todos' | 'stats'>('dashboard')
   const [timerTab, setTimerTab] = useState<'timer' | 'cards'>('timer')
   const [showSettings, setShowSettings] = useState(false)
   const [authChecked, setAuthChecked] = useState(false)
@@ -139,6 +140,8 @@ function App(): JSX.Element {
               />
             ) : tab === 'cards' ? (
               <CardsPage key="cards" />
+            ) : tab === 'todos' ? (
+              <TodosPage key="todos" />
             ) : (
               <Stats key="stats" />
             )}

@@ -55,6 +55,14 @@ const api = {
   reviewRemembered: (cardId: string) => ipcRenderer.invoke('review:remembered', cardId),
   reviewForgot: (cardId: string) => ipcRenderer.invoke('review:forgot', cardId),
 
+  // Todos
+  listTodos: () => ipcRenderer.invoke('todos:list'),
+  createTodo: (data: { title: string; notes?: string; due_date: string; sort_order?: number }) =>
+    ipcRenderer.invoke('todos:create', data),
+  updateTodo: (id: string, updates: Record<string, unknown>) =>
+    ipcRenderer.invoke('todos:update', id, updates),
+  deleteTodo: (id: string) => ipcRenderer.invoke('todos:delete', id),
+
   // Window controls
   minimizeWindow: () => ipcRenderer.invoke('window:minimize'),
   closeWindow: () => ipcRenderer.invoke('window:close'),

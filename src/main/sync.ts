@@ -6,7 +6,8 @@ import {
   HabitRow,
   SessionRow,
   DeckRow,
-  CardRow
+  CardRow,
+  TodoRow
 } from './db'
 
 export type SyncState = 'idle' | 'syncing' | 'error' | 'offline'
@@ -269,9 +270,72 @@ export async function runSync(): Promise<void> {
       }
     }
 
+    // First-time full push for todos (added after initial release).
+    // Bypass `since` filter so pre-existing local data gets uploaded once.
+    const todosFirstSync = !store.sync_meta.todos_synced_once
+    const todosSince = todosFirstSync ? null : since
+
+    // ========== Todos PUSH ==========
+    const localTodos = store.todos.filter(
+      t => !todosSince || (t.updated_at && t.updated_at > todosSince)
+    )
+    if (localTodos.length > 0) {
+      const rows = localTodos.map(t => ({
+        id: t.id,
+        user_id: userId,
+        title: t.title,
+        notes: t.notes || '',
+        due_date: t.due_date,
+        is_done: t.is_done,
+        completed_at: t.completed_at || null,
+        sort_order: t.sort_order,
+        created_at: t.created_at,
+        updated_at: t.updated_at || t.created_at,
+        deleted_at: t.deleted_at || null
+      }))
+      await sb.from('todos').upsert(rows, { onConflict: 'id' })
+    }
+
+    // ========== Todos PULL ==========
+    let todosQuery = sb.from('todos').select('*').eq('user_id', userId)
+    if (since) {
+      todosQuery = todosQuery.gt('updated_at', since)
+    }
+    const { data: remoteTodos } = await todosQuery
+
+    if (remoteTodos && remoteTodos.length > 0) {
+      for (const remote of remoteTodos) {
+        const localIdx = store.todos.findIndex(t => t.id === remote.id)
+        const remoteRow: TodoRow = {
+          id: remote.id,
+          title: remote.title,
+          notes: remote.notes || '',
+          due_date: remote.due_date,
+          is_done: remote.is_done,
+          completed_at: remote.completed_at || undefined,
+          sort_order: remote.sort_order,
+          created_at: remote.created_at,
+          updated_at: remote.updated_at,
+          deleted_at: remote.deleted_at || undefined
+        }
+
+        if (localIdx === -1) {
+          store.todos.push(remoteRow)
+        } else {
+          const local = store.todos[localIdx]
+          const localTime = local.updated_at || local.created_at
+          const remoteTime = remote.updated_at || remote.created_at
+          if (remoteTime > localTime) {
+            store.todos[localIdx] = remoteRow
+          }
+        }
+      }
+    }
+
     // Update sync timestamp
     store.sync_meta.last_sync_at = new Date().toISOString()
     store.sync_meta.cards_synced_once = true
+    store.sync_meta.todos_synced_once = true
     lastSyncAt = store.sync_meta.last_sync_at
     saveStore()
 

@@ -40,7 +40,8 @@
     "publish": {
       "provider": "github",
       "owner": "IMprove-app",
-      "repo": "IMprove"
+      "repo": "IMprove",
+      "releaseType": "release"
     }
   },
   "dependencies": {
