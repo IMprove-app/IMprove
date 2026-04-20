@@ -1,5 +1,14 @@
 import { ElectronAPI } from '@electron-toolkit/preload'
 
+// Habit category (P2a). One of the known values; old data falls back to 'uncategorized'.
+type HabitCategory =
+  | 'uncategorized'
+  | 'health'
+  | 'learning'
+  | 'emotion'
+  | 'creation'
+  | 'relation'
+
 interface HabitWithStats {
   id: string
   name: string
@@ -9,9 +18,13 @@ interface HabitWithStats {
   daily_goal_m: number
   sort_order: number
   is_archived: number
+  /** P2a: habit category. Defaults to 'uncategorized' for legacy rows. */
+  category: HabitCategory | string
   created_at: string
   todaySeconds: number
   streak: number
+  /** P2a: longest historical consecutive-day streak (does not require today). */
+  longestStreak: number
 }
 
 interface SessionData {
@@ -111,7 +124,14 @@ interface SyncStatusPayload {
 
 interface API {
   listHabits(): Promise<HabitWithStats[]>
+  /**
+   * Create a habit. Optional `category` field (HabitCategory) is forwarded;
+   * unknown values are coerced to 'uncategorized' on the main side.
+   */
   createHabit(data: Record<string, unknown>): Promise<HabitWithStats>
+  /**
+   * Update a habit. May include optional `category` field (HabitCategory).
+   */
   updateHabit(id: string, updates: Record<string, unknown>): Promise<HabitWithStats>
   deleteHabit(id: string): Promise<{ ok: boolean }>
   startSession(habitId: string): Promise<SessionData>

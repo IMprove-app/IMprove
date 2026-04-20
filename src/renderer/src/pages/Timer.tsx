@@ -1,6 +1,8 @@
 import { useState, useEffect, useRef } from 'react'
 import { motion, AnimatePresence } from 'framer-motion'
 import { ActiveSession } from '../App'
+import { playSessionStopTone } from '../lib/audio'
+import { SessionStopBurst } from '../components/SessionStopBurst'
 
 interface Props {
   session: ActiveSession
@@ -11,9 +13,11 @@ function Timer({ session, onStop }: Props): JSX.Element {
   const [elapsed, setElapsed] = useState(session.todaySeconds || 0)
   const [isPaused, setIsPaused] = useState(false)
   const [showGoalMet, setShowGoalMet] = useState(false)
+  const [showBurst, setShowBurst] = useState(false)
   const intervalRef = useRef<ReturnType<typeof setInterval> | null>(null)
   const tickCountRef = useRef(0)
   const goalMetRef = useRef(false)
+  const stoppedRef = useRef(false)
 
   useEffect(() => {
     intervalRef.current = setInterval(() => {
@@ -40,9 +44,18 @@ function Timer({ session, onStop }: Props): JSX.Element {
   }, [isPaused, session.sessionId, session.dailyGoalM])
 
   const handleStop = async () => {
+    if (stoppedRef.current) return
+    stoppedRef.current = true
     if (intervalRef.current) clearInterval(intervalRef.current)
     const sessionSeconds = elapsed - (session.todaySeconds || 0)
     await window.api.stopSession(session.sessionId, sessionSeconds)
+    // 触发庆祝：音效 + 粒子爆发，待 burst 完成后再返回
+    try { playSessionStopTone() } catch { /* noop */ }
+    setShowBurst(true)
+  }
+
+  const handleBurstComplete = () => {
+    setShowBurst(false)
     onStop()
   }
 
@@ -209,6 +222,9 @@ function Timer({ session, onStop }: Props): JSX.Element {
           <p className="text-xs text-txt-muted mt-1">继续学习或点击结束保存记录</p>
         </motion.div>
       )}
+
+      {/* 停止 session 的粒子爆发庆祝 */}
+      <SessionStopBurst show={showBurst} onComplete={handleBurstComplete} color={isGoalMet ? '#34d399' : '#22d3ee'} />
     </motion.div>
   )
 }

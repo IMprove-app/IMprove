@@ -16,6 +16,8 @@ interface HabitWithStats {
   created_at: string
   todaySeconds: number
   streak: number
+  longestStreak?: number
+  category?: string
 }
 
 interface Props {
@@ -41,7 +43,7 @@ function Dashboard({ onSessionStart, onOpenSettings, dueCount, onStartReview }: 
   }, [loadHabits])
 
   const handleAdd = async (data: {
-    name: string; icon: string; target_url: string; target_app: string; daily_goal_m: number
+    name: string; icon: string; target_url: string; target_app: string; daily_goal_m: number; category: string
   }) => {
     await window.api.createHabit({ ...data, sort_order: habits.length })
     setShowAdd(false)
@@ -49,7 +51,7 @@ function Dashboard({ onSessionStart, onOpenSettings, dueCount, onStartReview }: 
   }
 
   const handleEdit = async (data: {
-    name: string; icon: string; target_url: string; target_app: string; daily_goal_m: number
+    name: string; icon: string; target_url: string; target_app: string; daily_goal_m: number; category: string
   }) => {
     if (!editingHabit) return
     await window.api.updateHabit(editingHabit.id, data)
@@ -185,7 +187,8 @@ function Dashboard({ onSessionStart, onOpenSettings, dueCount, onStartReview }: 
             icon: editingHabit.icon,
             target_url: editingHabit.target_url,
             target_app: editingHabit.target_app,
-            daily_goal_m: editingHabit.daily_goal_m
+            daily_goal_m: editingHabit.daily_goal_m,
+            category: editingHabit.category
           }}
         />
       )}

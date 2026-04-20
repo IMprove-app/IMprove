@@ -65,6 +65,7 @@ export async function runSync(): Promise<void> {
         daily_goal_m: h.daily_goal_m,
         sort_order: h.sort_order,
         is_archived: h.is_archived,
+        category: h.category ?? 'uncategorized',
         created_at: h.created_at,
         updated_at: h.updated_at || h.created_at,
         deleted_at: h.deleted_at || null
@@ -112,6 +113,7 @@ export async function runSync(): Promise<void> {
           daily_goal_m: remote.daily_goal_m,
           sort_order: remote.sort_order,
           is_archived: remote.is_archived,
+          category: remote.category || 'uncategorized',
           created_at: remote.created_at,
           updated_at: remote.updated_at,
           deleted_at: remote.deleted_at || undefined

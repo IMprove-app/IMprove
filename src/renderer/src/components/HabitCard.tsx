@@ -1,5 +1,6 @@
 import { motion } from 'framer-motion'
 import { ActiveSession } from '../App'
+import { categoryByCode } from '../data/categories'
 
 interface HabitWithStats {
   id: string
@@ -10,6 +11,8 @@ interface HabitWithStats {
   daily_goal_m: number
   todaySeconds: number
   streak: number
+  longestStreak?: number
+  category?: string
 }
 
 interface Props {
@@ -51,6 +54,9 @@ function HabitCard({ habit, index, onStart, onEdit, onDelete }: Props): JSX.Elem
   const icon = ICONS[habit.icon] || ICONS.target
   const link = habit.target_url || habit.target_app || ''
   const linkDisplay = link.length > 30 ? link.slice(0, 30) + '...' : link
+  const category = categoryByCode(habit.category)
+  const longestStreak = habit.longestStreak ?? 0
+  const showLongest = longestStreak > habit.streak && longestStreak > 0
 
   const handleStart = async () => {
     const session = await window.api.startSession(habit.id)
@@ -70,7 +76,8 @@ function HabitCard({ habit, index, onStart, onEdit, onDelete }: Props): JSX.Elem
       initial={{ opacity: 0, y: 12 }}
       animate={{ opacity: 1, y: 0 }}
       transition={{ duration: 0.35, delay: index * 0.06, ease: [0.22, 1, 0.36, 1] }}
-      className="glass-card p-4 group"
+      className="glass-card p-4 group relative overflow-hidden"
+      style={{ borderLeft: `4px solid ${category.color}` }}
     >
       <div className="flex items-start justify-between mb-3">
         <div className="flex items-center gap-3">
@@ -78,6 +85,7 @@ function HabitCard({ habit, index, onStart, onEdit, onDelete }: Props): JSX.Elem
             className="text-2xl"
             whileHover={{ scale: 1.2, rotate: 5 }}
             transition={{ type: 'spring', stiffness: 300 }}
+            style={{ filter: `drop-shadow(0 0 6px ${category.color}55)` }}
           >
             {icon}
           </motion.span>
@@ -90,14 +98,26 @@ function HabitCard({ habit, index, onStart, onEdit, onDelete }: Props): JSX.Elem
         </div>
         {habit.streak > 0 && (
           <motion.div
-            className="flex items-center gap-1 text-streak text-xs font-semibold"
+            className="flex flex-col items-end gap-0.5"
             initial={{ scale: 0 }}
             animate={{ scale: 1 }}
             transition={{ type: 'spring', stiffness: 400, delay: index * 0.06 + 0.2 }}
           >
-            <span className={habit.streak >= 7 ? 'animate-pulse-glow' : ''}>🔥</span>
-            {habit.streak}天
+            <div className="flex items-center gap-1 text-streak text-xs font-semibold">
+              <span className={habit.streak >= 7 ? 'animate-pulse-glow' : ''}>🔥</span>
+              {habit.streak}天
+            </div>
+            {showLongest && (
+              <span className="text-txt-muted" style={{ fontSize: '10px' }}>
+                最长 {longestStreak} 天
+              </span>
+            )}
           </motion.div>
+        )}
+        {habit.streak === 0 && showLongest && (
+          <span className="text-txt-muted self-start" style={{ fontSize: '10px' }}>
+            最长 {longestStreak} 天
+          </span>
         )}
       </div>
 

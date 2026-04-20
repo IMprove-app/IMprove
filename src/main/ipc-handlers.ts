@@ -11,6 +11,7 @@ import {
   getActiveSession,
   getTodayTotalSeconds,
   getStreak,
+  getLongestStreak,
   getStats,
   getAllDecks,
   createDeck,
@@ -84,7 +85,8 @@ export function registerIpcHandlers(): void {
     return habits.map(h => ({
       ...h,
       todaySeconds: getTodayTotalSeconds(h.id),
-      streak: getStreak(h.id)
+      streak: getStreak(h.id),
+      longestStreak: getLongestStreak(h.id)
     }))
   })
 
@@ -96,7 +98,8 @@ export function registerIpcHandlers(): void {
       target_url: data.target_url || '',
       target_app: data.target_app || '',
       daily_goal_m: data.daily_goal_m || 30,
-      sort_order: data.sort_order || 0
+      sort_order: data.sort_order || 0,
+      category: typeof data.category === 'string' ? data.category : 'uncategorized'
     })
   })
 

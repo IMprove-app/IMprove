@@ -212,3 +212,10 @@ CREATE TRIGGER achievements_updated_at BEFORE UPDATE ON public.achievements
 DROP TRIGGER IF EXISTS badge_events_updated_at ON public.badge_events;
 CREATE TRIGGER badge_events_updated_at BEFORE UPDATE ON public.badge_events
   FOR EACH ROW EXECUTE FUNCTION update_updated_at();
+
+-- === Phase 2a habits.category ===
+-- Adds an optional category tag to habits for grouping in the achievements UI.
+-- Values: 'uncategorized' | 'health' | 'learning' | 'emotion' | 'creation' | 'relation'.
+
+ALTER TABLE public.habits
+  ADD COLUMN IF NOT EXISTS category TEXT NOT NULL DEFAULT 'uncategorized';

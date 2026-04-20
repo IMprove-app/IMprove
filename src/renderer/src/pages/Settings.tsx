@@ -1,5 +1,6 @@
 import { useState, useEffect } from 'react'
 import { motion } from 'framer-motion'
+import { getReduceMotionPref, setReduceMotion } from '../lib/motionPrefs'
 
 interface Props {
   onBack: () => void
@@ -22,6 +23,8 @@ function Settings({ onBack, loggedIn, onLogout, onLogin }: Props): JSX.Element {
   const [importing, setImporting] = useState(false)
   const [email, setEmail] = useState<string | null>(null)
   const [lastSync, setLastSync] = useState<string | null>(null)
+  // null = 跟随系统; true = 强制减弱; false = 强制启用
+  const [reduceMotionPref, setReduceMotionPref] = useState<boolean | null>(getReduceMotionPref())
 
   useEffect(() => {
     if (loggedIn) {
@@ -33,6 +36,11 @@ function Settings({ onBack, loggedIn, onLogout, onLogin }: Props): JSX.Element {
       })
     }
   }, [loggedIn])
+
+  const updateReduceMotion = (value: boolean | null): void => {
+    setReduceMotion(value)
+    setReduceMotionPref(value)
+  }
 
   const handleImportTemplate = async (t: typeof TEMPLATES[0]) => {
     setImporting(true)
@@ -146,6 +154,39 @@ function Settings({ onBack, loggedIn, onLogout, onLogin }: Props): JSX.Element {
               </motion.button>
             </motion.div>
           ))}
+        </div>
+      </div>
+
+      <div className="glass-card p-4 mb-4">
+        <h3 className="text-sm font-semibold text-txt-secondary mb-3">外观与动画</h3>
+        <div className="flex items-center justify-between mb-2">
+          <div>
+            <p className="text-xs text-txt-primary font-medium">减弱动画</p>
+            <p className="text-[10px] text-txt-muted mt-0.5">关闭粒子爆发、闪光等动效，减少视觉负担</p>
+          </div>
+        </div>
+        <div className="flex gap-2 mt-2">
+          {([
+            { value: null, label: '跟随系统' },
+            { value: false, label: '始终启用' },
+            { value: true, label: '始终减弱' }
+          ] as { value: boolean | null; label: string }[]).map(opt => {
+            const active = reduceMotionPref === opt.value
+            return (
+              <motion.button
+                key={String(opt.value)}
+                onClick={() => updateReduceMotion(opt.value)}
+                className={`flex-1 text-[10px] py-2 rounded-lg border transition-colors ${
+                  active
+                    ? 'bg-accent-cyan/15 text-accent-cyan border-accent-cyan/30'
+                    : 'bg-bg-elevated text-txt-muted border-bg-border hover:border-txt-muted/30'
+                }`}
+                whileTap={{ scale: 0.95 }}
+              >
+                {opt.label}
+              </motion.button>
+            )
+          })}
         </div>
       </div>
 

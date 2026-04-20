@@ -5,6 +5,31 @@ import { randomUUID } from 'crypto'
 
 // ============ Types ============
 
+// Habit category (P2a). Stored as string at runtime for forward compatibility.
+export type HabitCategory =
+  | 'uncategorized'
+  | 'health'      // 健康
+  | 'learning'    // 学习
+  | 'emotion'     // 情绪
+  | 'creation'    // 创造
+  | 'relation'    // 关系
+
+const VALID_HABIT_CATEGORIES: ReadonlySet<string> = new Set([
+  'uncategorized',
+  'health',
+  'learning',
+  'emotion',
+  'creation',
+  'relation'
+])
+
+function normalizeCategory(value: unknown): string {
+  if (typeof value === 'string' && VALID_HABIT_CATEGORIES.has(value)) {
+    return value
+  }
+  return 'uncategorized'
+}
+
 export interface HabitRow {
   id: string
   name: string
@@ -14,6 +39,7 @@ export interface HabitRow {
   daily_goal_m: number
   sort_order: number
   is_archived: number
+  category: string
   created_at: string
   updated_at?: string
   deleted_at?: string
@@ -169,6 +195,10 @@ export function loadStore(): StoreData {
       // Migrate: backfill updated_at for old records
       for (const h of store.habits) {
         if (!h.updated_at) h.updated_at = h.created_at
+        // P2a: backfill habit category for legacy data
+        if (!h.category || !VALID_HABIT_CATEGORIES.has(h.category)) {
+          h.category = 'uncategorized'
+        }
       }
       for (const s of store.sessions) {
         if (!s.updated_at) s.updated_at = s.started_at
@@ -209,6 +239,7 @@ export function createHabit(habit: Omit<HabitRow, 'created_at' | 'is_archived' |
   const now = new Date().toISOString()
   const row: HabitRow = {
     ...habit,
+    category: normalizeCategory(habit.category),
     is_archived: 0,
     created_at: now,
     updated_at: now
@@ -222,7 +253,14 @@ export function updateHabit(id: string, updates: Partial<HabitRow>): HabitRow | 
   const s = loadStore()
   const idx = s.habits.findIndex(h => h.id === id)
   if (idx === -1) return undefined
-  s.habits[idx] = { ...s.habits[idx], ...updates, id, updated_at: new Date().toISOString() }
+  const next: HabitRow = { ...s.habits[idx], ...updates, id, updated_at: new Date().toISOString() }
+  // Sanitize category if provided (or backfill if missing)
+  if (Object.prototype.hasOwnProperty.call(updates, 'category')) {
+    next.category = normalizeCategory(updates.category)
+  } else if (!next.category) {
+    next.category = 'uncategorized'
+  }
+  s.habits[idx] = next
   saveStore()
   return s.habits[idx]
 }
@@ -319,6 +357,44 @@ export function getStreak(habitId: string): number {
     }
   }
   return streak
+}
+
+// Longest historical consecutive-day run for a habit (does not require today).
+export function getLongestStreak(habitId: string): number {
+  const s = loadStore()
+  const habit = s.habits.find(h => h.id === habitId)
+  if (!habit) return 0
+
+  const goalSec = habit.daily_goal_m * 60
+
+  const dailyMap: Record<string, number> = {}
+  for (const ss of s.sessions) {
+    if (ss.habit_id !== habitId || ss.ended_at === null || ss.active_sec <= 0) continue
+    const d = ss.started_at.slice(0, 10)
+    dailyMap[d] = (dailyMap[d] || 0) + ss.active_sec
+  }
+
+  const qualifiedDates = Object.entries(dailyMap)
+    .filter(([, sec]) => sec >= goalSec)
+    .map(([d]) => d)
+    .sort() // ascending
+
+  if (qualifiedDates.length === 0) return 0
+
+  let best = 1
+  let run = 1
+  for (let i = 1; i < qualifiedDates.length; i++) {
+    const prev = new Date(qualifiedDates[i - 1])
+    const curr = new Date(qualifiedDates[i])
+    const diffDays = (curr.getTime() - prev.getTime()) / 86400000
+    if (Math.abs(diffDays - 1) < 0.01) {
+      run++
+      if (run > best) best = run
+    } else {
+      run = 1
+    }
+  }
+  return best
 }
 
 // ============ Statistics ============

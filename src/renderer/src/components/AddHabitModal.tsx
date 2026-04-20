@@ -1,4 +1,5 @@
 import { useState } from 'react'
+import { CATEGORIES, HabitCategoryCode } from '../data/categories'
 
 interface Props {
   onSave: (data: {
@@ -7,6 +8,7 @@ interface Props {
     target_url: string
     target_app: string
     daily_goal_m: number
+    category: HabitCategoryCode
   }) => void
   onClose: () => void
   initial?: {
@@ -15,6 +17,7 @@ interface Props {
     target_url: string
     target_app: string
     daily_goal_m: number
+    category?: string
   }
 }
 
@@ -43,6 +46,10 @@ const TEMPLATES = [
   { name: '语言学习', icon: 'globe', url: 'https://www.duolingo.com/learn', goal: 10 }
 ]
 
+function isValidCategory(c: string | undefined): c is HabitCategoryCode {
+  return !!c && CATEGORIES.some((cat) => cat.code === c)
+}
+
 function AddHabitModal({ onSave, onClose, initial }: Props): JSX.Element {
   const [name, setName] = useState(initial?.name || '')
   const [icon, setIcon] = useState(initial?.icon || 'target')
@@ -52,6 +59,9 @@ function AddHabitModal({ onSave, onClose, initial }: Props): JSX.Element {
   const [url, setUrl] = useState(initial?.target_url || '')
   const [appPath, setAppPath] = useState(initial?.target_app || '')
   const [goal, setGoal] = useState(initial?.daily_goal_m || 30)
+  const [category, setCategory] = useState<HabitCategoryCode>(
+    isValidCategory(initial?.category) ? initial!.category as HabitCategoryCode : 'uncategorized'
+  )
   const [showTemplates, setShowTemplates] = useState(!initial)
 
   const handleSave = () => {
@@ -61,7 +71,8 @@ function AddHabitModal({ onSave, onClose, initial }: Props): JSX.Element {
       icon,
       target_url: linkType === 'url' ? url.trim() : '',
       target_app: linkType === 'app' ? appPath.trim() : '',
-      daily_goal_m: goal
+      daily_goal_m: goal,
+      category
     })
   }
 
@@ -128,6 +139,28 @@ function AddHabitModal({ onSave, onClose, initial }: Props): JSX.Element {
             ))}
           </div>
         </label>
+
+        <div className="block mb-3">
+          <span className="text-xs text-txt-secondary mb-1 block">
+            分类 <span className="text-txt-muted">· {CATEGORIES.find(c => c.code === category)?.label}</span>
+          </span>
+          <div className="flex gap-2">
+            {CATEGORIES.map(cat => (
+              <button
+                key={cat.code}
+                type="button"
+                onClick={() => setCategory(cat.code)}
+                title={cat.label}
+                className={`w-7 h-7 rounded-full transition-all ${
+                  category === cat.code
+                    ? 'ring-2 ring-white/60 scale-110'
+                    : 'opacity-70 hover:opacity-100'
+                }`}
+                style={{ backgroundColor: cat.color }}
+              />
+            ))}
+          </div>
+        </div>
 
         <label className="block mb-3">
           <span className="text-xs text-txt-secondary mb-1 block">打开方式</span>
