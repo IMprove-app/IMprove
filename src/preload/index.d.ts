@@ -25,6 +25,8 @@ interface HabitWithStats {
   streak: number
   /** P2a: longest historical consecutive-day streak (does not require today). */
   longestStreak: number
+  /** P2b: true if yesterday's active_sec for this habit was below daily goal. */
+  missedYesterday: boolean
 }
 
 interface SessionData {
@@ -35,6 +37,8 @@ interface SessionData {
   active_sec: number
   idle_sec: number
   notes: string
+  /** P2b: 1 if the session was created via shield:redeem. */
+  is_shield?: number
 }
 
 interface AuthResult {
@@ -113,6 +117,14 @@ interface UserProgressData {
   total_stars: number
   xp_multiplier: number
   rebirth_count: number
+  /** P2b: current shields in hand (0-3). */
+  shields: number
+  /** P2b: 'YYYY-MM' local key for monthly cap tracking. */
+  shield_month: string
+  /** P2b: shields redeemed this calendar month (0-2). */
+  shield_used_this_month: number
+  /** P2b: lifetime shield redemptions (drives shield-related achievements). */
+  total_shields_used: number
   updated_at: string
 }
 
@@ -163,6 +175,9 @@ interface API {
   createTodo(data: { title: string; notes?: string; due_date: string; sort_order?: number }): Promise<TodoData>
   updateTodo(id: string, updates: Record<string, unknown>): Promise<TodoData>
   deleteTodo(id: string): Promise<{ ok: boolean }>
+
+  // Star Shields (P2b)
+  redeemShield(habitId: string): Promise<{ ok: boolean; reason?: string; progress?: UserProgressData }>
 
   // Progress & Achievements
   getProgress(): Promise<UserProgressData>

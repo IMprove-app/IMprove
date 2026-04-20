@@ -36,6 +36,10 @@ import {
   persistAchievement,
   getUserProgress,
   setUserProgress,
+  canRedeemShield,
+  createShieldSession,
+  wasMissedYesterday,
+  currentMonthKey,
   HabitRow,
   TodoRow,
   AchievementRow,
@@ -79,6 +83,24 @@ async function safeEvaluateSessionEnd(
 }
 
 export function registerIpcHandlers(): void {
+  // P2b: on app startup, roll the shield month over if the calendar month
+  // has changed since we last wrote progress. Keeps shield_used_this_month
+  // honest even if the user didn't redeem anything last month.
+  try {
+    const p = getUserProgress()
+    const month = currentMonthKey()
+    if (p.shield_month !== month) {
+      setUserProgress({
+        ...p,
+        shield_month: month,
+        shield_used_this_month: 0,
+        updated_at: new Date().toISOString()
+      })
+    }
+  } catch {
+    // Non-fatal: first-run or corrupted store will self-heal on the next write.
+  }
+
   // ====== Habits ======
   ipcMain.handle('habits:list', () => {
     const habits = getAllHabits()
@@ -86,7 +108,9 @@ export function registerIpcHandlers(): void {
       ...h,
       todaySeconds: getTodayTotalSeconds(h.id),
       streak: getStreak(h.id),
-      longestStreak: getLongestStreak(h.id)
+      longestStreak: getLongestStreak(h.id),
+      // P2b: true if yesterday's active_sec for this habit was below daily goal.
+      missedYesterday: wasMissedYesterday(h.id)
     }))
   })
 
@@ -327,6 +351,85 @@ export function registerIpcHandlers(): void {
       // Agent B module not available
     }
     return { ok: false, progress: getUserProgress(), unlocked: [] }
+  })
+
+  // ====== P2b Star Shield ======
+  ipcMain.handle('shield:redeem', async (_e, habitId: string) => {
+    // 1. Must hold a shield and not be over the monthly cap.
+    const progress = getUserProgress()
+    const guard = canRedeemShield(progress)
+    if (!guard.ok) {
+      return { ok: false, reason: guard.reason }
+    }
+
+    // 2. The targeted habit must actually have missed yesterday.
+    if (!wasMissedYesterday(habitId)) {
+      return { ok: false, reason: '昨天没有缺打该习惯，不需要使用星辰盾' }
+    }
+
+    // 3. Compute yesterday's local date and build the shield session.
+    const now = new Date()
+    const y = new Date(now.getFullYear(), now.getMonth(), now.getDate() - 1)
+    const yyyy = y.getFullYear()
+    const mm = String(y.getMonth() + 1).padStart(2, '0')
+    const dd = String(y.getDate()).padStart(2, '0')
+    const missedDate = `${yyyy}-${mm}-${dd}`
+
+    const store = loadStore()
+    const shieldSession = createShieldSession(habitId, missedDate)
+    store.sessions.push(shieldSession)
+
+    // 4. Emit a badge event marking this as a shielded session.
+    const event = appendBadgeEvent({
+      event_type: 'session_end',
+      habit_id: shieldSession.habit_id,
+      session_id: shieldSession.id,
+      started_at: shieldSession.started_at,
+      ended_at: shieldSession.ended_at ?? undefined,
+      active_sec: shieldSession.active_sec,
+      payload: JSON.stringify({ shielded: true, missedDate })
+    })
+
+    // 5. Decrement shield inventory, bump monthly & lifetime counters.
+    //    If the stored shield_month is stale, reset it first.
+    const month = currentMonthKey()
+    const usedThisMonth =
+      progress.shield_month === month ? (progress.shield_used_this_month ?? 0) : 0
+    const nextProgress: UserProgress = {
+      ...progress,
+      shields: Math.max(0, (progress.shields ?? 0) - 1),
+      shield_month: month,
+      shield_used_this_month: usedThisMonth + 1,
+      total_shields_used: (progress.total_shields_used ?? 0) + 1,
+      updated_at: new Date().toISOString()
+    }
+    setUserProgress(nextProgress)
+
+    // 6. Let Agent B's engine process the shielded session (may unlock
+    //    achievements such as "first-shield-used" without awarding XP twice).
+    const outcome = await safeEvaluateSessionEnd(event)
+    for (const ach of outcome.newAchievements) persistAchievement(ach)
+    // The engine returns its own newProgress; shield bookkeeping we just wrote
+    // must survive. Merge: engine wins on level/xp/totals, shield fields we keep.
+    const finalProgress: UserProgress = {
+      ...outcome.newProgress,
+      shields: nextProgress.shields,
+      shield_month: nextProgress.shield_month,
+      shield_used_this_month: nextProgress.shield_used_this_month,
+      total_shields_used: nextProgress.total_shields_used,
+      updated_at: new Date().toISOString()
+    }
+    setUserProgress(finalProgress)
+    saveStore()
+
+    // 7. Notify renderer.
+    const win = getMainWindow()
+    win?.webContents.send('progress:updated', finalProgress)
+    for (const ach of outcome.newAchievements) {
+      win?.webContents.send('achievement:unlocked', ach)
+    }
+
+    return { ok: true, progress: finalProgress }
   })
 
   // ====== Window Controls ======

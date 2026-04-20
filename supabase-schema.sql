@@ -219,3 +219,14 @@ CREATE TRIGGER badge_events_updated_at BEFORE UPDATE ON public.badge_events
 
 ALTER TABLE public.habits
   ADD COLUMN IF NOT EXISTS category TEXT NOT NULL DEFAULT 'uncategorized';
+
+-- === Phase 2b Shields ===
+-- Star Shield (星辰盾) lets a user retroactively cover one missed day per redemption.
+-- Monthly cap = 2 redemptions; inventory cap = 3. Each redemption also creates a
+-- session row with is_shield=1 so streak logic treats that day as qualifying.
+
+ALTER TABLE public.profiles ADD COLUMN IF NOT EXISTS shields INTEGER NOT NULL DEFAULT 0;
+ALTER TABLE public.profiles ADD COLUMN IF NOT EXISTS shield_month TEXT NOT NULL DEFAULT '';
+ALTER TABLE public.profiles ADD COLUMN IF NOT EXISTS shield_used_this_month INTEGER NOT NULL DEFAULT 0;
+ALTER TABLE public.profiles ADD COLUMN IF NOT EXISTS total_shields_used INTEGER NOT NULL DEFAULT 0;
+ALTER TABLE public.sessions ADD COLUMN IF NOT EXISTS is_shield INTEGER NOT NULL DEFAULT 0;

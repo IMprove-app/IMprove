@@ -1,3 +1,4 @@
+import { useState } from 'react'
 import { motion } from 'framer-motion'
 import { ActiveSession } from '../App'
 import { categoryByCode } from '../data/categories'
@@ -13,6 +14,8 @@ interface HabitWithStats {
   streak: number
   longestStreak?: number
   category?: string
+  /** P2b: true if the habit missed yesterday's daily goal (eligible for 星辰盾 redeem). */
+  missedYesterday?: boolean
 }
 
 interface Props {
@@ -21,6 +24,8 @@ interface Props {
   onStart: (session: ActiveSession) => void
   onEdit: (habit: HabitWithStats) => void
   onDelete: (id: string) => void
+  /** P2b: shields currently held by the user — needed to show the 补签 button. */
+  shields?: number
 }
 
 const ICONS: Record<string, string> = {
@@ -46,7 +51,7 @@ function formatTime(seconds: number): string {
   return `${h}h ${rm}m`
 }
 
-function HabitCard({ habit, index, onStart, onEdit, onDelete }: Props): JSX.Element {
+function HabitCard({ habit, index, onStart, onEdit, onDelete, shields = 0 }: Props): JSX.Element {
   const todayMin = Math.floor(habit.todaySeconds / 60)
   const goalMin = habit.daily_goal_m
   const progress = Math.min((todayMin / goalMin) * 100, 100)
@@ -57,6 +62,8 @@ function HabitCard({ habit, index, onStart, onEdit, onDelete }: Props): JSX.Elem
   const category = categoryByCode(habit.category)
   const longestStreak = habit.longestStreak ?? 0
   const showLongest = longestStreak > habit.streak && longestStreak > 0
+  const canRedeem = !!habit.missedYesterday && shields > 0
+  const [redeeming, setRedeeming] = useState(false)
 
   const handleStart = async () => {
     const session = await window.api.startSession(habit.id)
@@ -69,6 +76,30 @@ function HabitCard({ habit, index, onStart, onEdit, onDelete }: Props): JSX.Elem
       dailyGoalM: habit.daily_goal_m,
       todaySeconds: habit.todaySeconds
     })
+  }
+
+  const handleRedeem = async () => {
+    if (redeeming) return
+    setRedeeming(true)
+    try {
+      const api = window.api as typeof window.api & {
+        redeemShield?: (habitId: string) => Promise<{ ok: boolean; reason?: string }>
+      }
+      if (!api.redeemShield) {
+        alert('当前版本暂不支持星辰盾补签')
+        return
+      }
+      const res = await api.redeemShield(habit.id)
+      if (!res.ok) {
+        alert(`补签失败：${res.reason ?? '未知原因'}`)
+      }
+      // Success: parent Dashboard will refresh via progress:updated listener.
+    } catch (e) {
+      console.warn('redeemShield failed', e)
+      alert('补签失败，请稍后重试')
+    } finally {
+      setRedeeming(false)
+    }
   }
 
   return (
@@ -162,25 +193,41 @@ function HabitCard({ habit, index, onStart, onEdit, onDelete }: Props): JSX.Elem
             删除
           </button>
         </div>
-        {!isComplete ? (
-          <motion.button
-            onClick={handleStart}
-            className="btn-glow text-xs py-2 px-5"
-            whileHover={{ scale: 1.05 }}
-            whileTap={{ scale: 0.95 }}
-          >
-            ▶ 开始
-          </motion.button>
-        ) : (
-          <motion.button
-            onClick={handleStart}
-            className="text-xs py-2 px-5 rounded-xl border border-success/30 text-success bg-success/10 hover:bg-success/20 transition-colors cursor-pointer"
-            whileHover={{ scale: 1.05 }}
-            whileTap={{ scale: 0.95 }}
-          >
-            继续
-          </motion.button>
-        )}
+        <div className="flex items-center gap-2">
+          {canRedeem && (
+            <motion.button
+              onClick={handleRedeem}
+              disabled={redeeming}
+              className="text-[11px] py-1.5 px-2.5 rounded-lg bg-bg-elevated/80 border border-accent-cyan/30 text-accent-cyan hover:bg-bg-elevated hover:border-accent-cyan/60 transition-colors disabled:opacity-60 disabled:cursor-not-allowed flex items-center gap-1"
+              whileHover={{ scale: redeeming ? 1 : 1.05 }}
+              whileTap={{ scale: redeeming ? 1 : 0.9, opacity: 0.7 }}
+              transition={{ duration: 0.3 }}
+              title={`使用星辰盾补签昨天（当前持有 ${shields} 张）`}
+            >
+              <span>🛡️</span>
+              <span>{redeeming ? '补签中…' : '补签'}</span>
+            </motion.button>
+          )}
+          {!isComplete ? (
+            <motion.button
+              onClick={handleStart}
+              className="btn-glow text-xs py-2 px-5"
+              whileHover={{ scale: 1.05 }}
+              whileTap={{ scale: 0.95 }}
+            >
+              ▶ 开始
+            </motion.button>
+          ) : (
+            <motion.button
+              onClick={handleStart}
+              className="text-xs py-2 px-5 rounded-xl border border-success/30 text-success bg-success/10 hover:bg-success/20 transition-colors cursor-pointer"
+              whileHover={{ scale: 1.05 }}
+              whileTap={{ scale: 0.95 }}
+            >
+              继续
+            </motion.button>
+          )}
+        </div>
       </div>
     </motion.div>
   )

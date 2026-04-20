@@ -18,6 +18,8 @@ interface HabitWithStats {
   streak: number
   longestStreak?: number
   category?: string
+  /** P2b: true if this habit missed yesterday's goal (eligible for 星辰盾补签). */
+  missedYesterday?: boolean
 }
 
 interface Props {
@@ -32,15 +34,42 @@ function Dashboard({ onSessionStart, onOpenSettings, dueCount, onStartReview }: 
   const [showAdd, setShowAdd] = useState(false)
   const [editingHabit, setEditingHabit] = useState<HabitWithStats | null>(null)
   const [deleteConfirm, setDeleteConfirm] = useState<string | null>(null)
+  const [shields, setShields] = useState<number>(0)
 
   const loadHabits = useCallback(async () => {
     const list = await window.api.listHabits()
     setHabits(list)
   }, [])
 
+  const loadShields = useCallback(async () => {
+    try {
+      const p = (await window.api.getProgress()) as { shields?: number } | null
+      setShields(p?.shields ?? 0)
+    } catch (e) {
+      console.warn('load progress (shields) failed', e)
+      setShields(0)
+    }
+  }, [])
+
   useEffect(() => {
     loadHabits()
-  }, [loadHabits])
+    loadShields()
+    const unsub = window.api.onProgressUpdated((payload) => {
+      const next = (payload as unknown as { shields?: number } | null)?.shields
+      if (typeof next === 'number') {
+        setShields(next)
+      }
+      // Re-pull habits so missedYesterday refreshes after a successful redeem.
+      loadHabits()
+    })
+    return () => {
+      try {
+        unsub()
+      } catch {
+        /* noop */
+      }
+    }
+  }, [loadHabits, loadShields])
 
   const handleAdd = async (data: {
     name: string; icon: string; target_url: string; target_app: string; daily_goal_m: number; category: string
@@ -162,6 +191,7 @@ function Dashboard({ onSessionStart, onOpenSettings, dueCount, onStartReview }: 
               onStart={onSessionStart}
               onEdit={() => setEditingHabit(habit)}
               onDelete={(id) => setDeleteConfirm(id)}
+              shields={shields}
             />
           ))
         )}

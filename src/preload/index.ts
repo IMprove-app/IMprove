@@ -63,6 +63,9 @@ const api = {
     ipcRenderer.invoke('todos:update', id, updates),
   deleteTodo: (id: string) => ipcRenderer.invoke('todos:delete', id),
 
+  // Star Shields (P2b)
+  redeemShield: (habitId: string) => ipcRenderer.invoke('shield:redeem', habitId),
+
   // Progress & Achievements
   getProgress: () => ipcRenderer.invoke('progress:get'),
   listAchievements: () => ipcRenderer.invoke('achievements:list'),

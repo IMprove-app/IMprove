@@ -87,6 +87,7 @@ export async function runSync(): Promise<void> {
         active_sec: s.active_sec,
         idle_sec: s.idle_sec,
         notes: s.notes || '',
+        is_shield: s.is_shield ?? 0,
         updated_at: s.updated_at || s.started_at
       }))
       await sb.from('sessions').upsert(rows, { onConflict: 'id' })
@@ -152,6 +153,7 @@ export async function runSync(): Promise<void> {
           active_sec: remote.active_sec,
           idle_sec: remote.idle_sec,
           notes: remote.notes || '',
+          is_shield: remote.is_shield ?? 0,
           updated_at: remote.updated_at
         }
 
@@ -469,7 +471,12 @@ export async function runSync(): Promise<void> {
         total_xp: progress.total_xp,
         total_stars: progress.total_stars,
         xp_multiplier: progress.xp_multiplier,
-        rebirth_count: progress.rebirth_count
+        rebirth_count: progress.rebirth_count,
+        // P2b shields
+        shields: progress.shields ?? 0,
+        shield_month: progress.shield_month ?? '',
+        shield_used_this_month: progress.shield_used_this_month ?? 0,
+        total_shields_used: progress.total_shields_used ?? 0
       },
       { onConflict: 'id' }
     )
@@ -477,7 +484,9 @@ export async function runSync(): Promise<void> {
     // ========== User Progress PULL (from profiles row, last-write-wins) ==========
     const { data: remoteProfile } = await sb
       .from('profiles')
-      .select('level, xp, total_xp, total_stars, xp_multiplier, rebirth_count')
+      .select(
+        'level, xp, total_xp, total_stars, xp_multiplier, rebirth_count, shields, shield_month, shield_used_this_month, total_shields_used'
+      )
       .eq('id', userId)
       .maybeSingle()
 
@@ -489,6 +498,10 @@ export async function runSync(): Promise<void> {
         total_stars: remoteProfile.total_stars ?? 0,
         xp_multiplier: remoteProfile.xp_multiplier ?? 1.0,
         rebirth_count: remoteProfile.rebirth_count ?? 0,
+        shields: remoteProfile.shields ?? 0,
+        shield_month: remoteProfile.shield_month ?? '',
+        shield_used_this_month: remoteProfile.shield_used_this_month ?? 0,
+        total_shields_used: remoteProfile.total_shields_used ?? 0,
         updated_at: new Date().toISOString()
       }
       // Last-write-wins: prefer remote if it has more total_xp OR higher level

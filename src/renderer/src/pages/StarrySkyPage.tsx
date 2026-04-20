@@ -7,6 +7,12 @@ interface UserProgress {
   total_xp: number
   total_stars: number
   updated_at?: string
+  /** P2b: shields currently held (star shield). */
+  shields?: number
+  /** P2b: shields already used this month (cap is 2). */
+  shield_used_this_month?: number
+  /** P2b: cumulative shields ever used. */
+  total_shields_used?: number
 }
 
 interface AchievementRow {
@@ -114,7 +120,28 @@ function StarrySkyPage(): JSX.Element {
       </div>
 
       {/* 等级卡片 */}
-      <div className="glass-card p-4 mb-5">
+      <div className="glass-card p-4 mb-5 relative">
+        {(() => {
+          const shields = progress?.shields ?? 0
+          const usedMonth = progress?.shield_used_this_month ?? 0
+          const usedTotal = progress?.total_shields_used ?? 0
+          const isDim = shields === 0
+          return (
+            <div
+              className={`absolute top-2.5 right-3 flex items-center gap-1 px-2 py-1 rounded-full border text-[11px] font-semibold ${
+                isDim
+                  ? 'border-bg-border bg-bg-elevated/60 text-txt-muted'
+                  : 'border-accent-cyan/30 bg-bg-elevated/80 text-accent-cyan shadow-[0_0_8px_rgba(34,211,238,0.25)]'
+              }`}
+              title={`当前持有 ${shields} 张 · 本月已用 ${usedMonth}/2 · 累计 ${usedTotal} 次`}
+            >
+              <svg width="13" height="13" viewBox="0 0 24 24" fill="currentColor" aria-hidden="true">
+                <path d="M12 2 L20 5 V12 C20 17 16 21 12 22 C8 21 4 17 4 12 V5 Z" />
+              </svg>
+              <span>×{shields}</span>
+            </div>
+          )
+        })()}
         <div className="flex items-center gap-4">
           <div
             className="w-16 h-16 rounded-full flex items-center justify-center text-white font-bold shadow-[0_0_16px_rgba(34,211,238,0.35)]"

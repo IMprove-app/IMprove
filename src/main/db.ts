@@ -54,6 +54,8 @@ export interface SessionRow {
   idle_sec: number
   notes: string
   updated_at?: string
+  /** P2b: 1 if this session was created by a Star Shield (shield:redeem) to cover a missed day. */
+  is_shield?: number
 }
 
 interface SyncMeta {
@@ -132,6 +134,11 @@ export interface UserProgress {
   total_stars: number        // lifetime stars earned (== total_xp for now)
   xp_multiplier: number      // 1.0 default
   rebirth_count: number      // 0 for P1
+  // P2b Star Shields:
+  shields: number                 // current shields held, 0-3
+  shield_month: string            // 'YYYY-MM' in local tz; when month changes, reset shield_used_this_month
+  shield_used_this_month: number  // 0-2
+  total_shields_used: number      // lifetime shield redemptions, used for achievements
   updated_at: string
 }
 
@@ -143,6 +150,10 @@ function defaultUserProgress(): UserProgress {
     total_stars: 0,
     xp_multiplier: 1.0,
     rebirth_count: 0,
+    shields: 0,
+    shield_month: '',
+    shield_used_this_month: 0,
+    total_shields_used: 0,
     updated_at: new Date().toISOString()
   }
 }
@@ -214,6 +225,14 @@ export function loadStore(): StoreData {
       if (!store.achievements) store.achievements = []
       if (!store.badge_events) store.badge_events = []
       if (!store.user_progress) store.user_progress = defaultUserProgress()
+      // P2b: backfill shield fields on legacy user_progress rows.
+      const up = store.user_progress as Partial<UserProgress>
+      if (typeof up.shields !== 'number') up.shields = 0
+      if (typeof up.shield_month !== 'string') up.shield_month = ''
+      if (typeof up.shield_used_this_month !== 'number') up.shield_used_this_month = 0
+      if (typeof up.total_shields_used !== 'number') up.total_shields_used = 0
+      // P2b: default is_shield=0 on legacy sessions only if the caller inspects it.
+      // We keep optional to avoid bloating the store; sync layer uses `?? 0`.
     } catch {
       store = empty
     }
@@ -736,6 +755,110 @@ export function setUserProgress(next: UserProgress): void {
   const s = loadStore()
   s.user_progress = { ...next, updated_at: new Date().toISOString() }
   saveStore()
+}
+
+// ============ P2b Star Shields ============
+
+/**
+ * Current month key in local timezone: 'YYYY-MM'.
+ * Used to reset `shield_used_this_month` when the calendar month flips.
+ */
+export function currentMonthKey(): string {
+  const now = new Date()
+  const y = now.getFullYear()
+  const m = String(now.getMonth() + 1).padStart(2, '0')
+  return `${y}-${m}`
+}
+
+/**
+ * Check whether the user may redeem a shield right now.
+ * Rules: must have at least 1 shield in hand, and must not have already
+ * used 2 shields this calendar month (monthly cap = 2).
+ */
+export function canRedeemShield(
+  progress: UserProgress
+): { ok: boolean; reason?: string } {
+  if ((progress.shields ?? 0) <= 0) {
+    return { ok: false, reason: '没有可用的星辰盾' }
+  }
+  const month = currentMonthKey()
+  const usedThisMonth =
+    progress.shield_month === month ? (progress.shield_used_this_month ?? 0) : 0
+  if (usedThisMonth >= 2) {
+    return { ok: false, reason: '本月星辰盾已用完（最多2次/月）' }
+  }
+  return { ok: true }
+}
+
+/**
+ * Construct a shield-backfill session for a habit on `missedDate` (YYYY-MM-DD, local).
+ * The timestamp is set to 00:30 local time of that date, and `active_sec` is set
+ * to the habit's daily goal so the session qualifies as a valid day in getStreak.
+ *
+ * Returned row is NOT yet pushed to the store; callers should push + save.
+ */
+export function createShieldSession(habitId: string, missedDate: string): SessionRow {
+  const s = loadStore()
+  const habit = s.habits.find(h => h.id === habitId)
+  const goalSec = Math.max(1, (habit?.daily_goal_m ?? 30) * 60)
+
+  // Build a local-time timestamp of missedDate 00:30, then convert to ISO.
+  // missedDate is YYYY-MM-DD (local).
+  const [y, m, d] = missedDate.split('-').map(n => parseInt(n, 10))
+  const start = new Date(y, (m || 1) - 1, d || 1, 0, 30, 0, 0)
+  const end = new Date(start.getTime() + goalSec * 1000)
+  const startedAt = start.toISOString()
+  const endedAt = end.toISOString()
+  const nowIso = new Date().toISOString()
+
+  return {
+    id: randomUUID(),
+    habit_id: habitId,
+    started_at: startedAt,
+    ended_at: endedAt,
+    active_sec: goalSec,
+    idle_sec: 0,
+    notes: '',
+    updated_at: nowIso,
+    is_shield: 1
+  }
+}
+
+/**
+ * Check whether the given habit was "missed yesterday" in local time:
+ * yesterday exists as a real past day AND it has no session whose local-day
+ * total active_sec meets the habit's daily_goal_m * 60.
+ *
+ * Returns false if the habit does not exist.
+ */
+export function wasMissedYesterday(habitId: string): boolean {
+  const s = loadStore()
+  const habit = s.habits.find(h => h.id === habitId)
+  if (!habit) return false
+
+  // Yesterday's local date in YYYY-MM-DD (using local tz).
+  const now = new Date()
+  const y = new Date(now.getFullYear(), now.getMonth(), now.getDate() - 1)
+  const yy = y.getFullYear()
+  const mm = String(y.getMonth() + 1).padStart(2, '0')
+  const dd = String(y.getDate()).padStart(2, '0')
+  const yesterdayLocal = `${yy}-${mm}-${dd}`
+
+  const goalSec = habit.daily_goal_m * 60
+
+  let totalSec = 0
+  for (const ss of s.sessions) {
+    if (ss.habit_id !== habitId || ss.ended_at === null || ss.active_sec <= 0) continue
+    // Use local day of started_at to match user-perceived "yesterday".
+    const d = new Date(ss.started_at)
+    const yy2 = d.getFullYear()
+    const mm2 = String(d.getMonth() + 1).padStart(2, '0')
+    const dd2 = String(d.getDate()).padStart(2, '0')
+    const localDay = `${yy2}-${mm2}-${dd2}`
+    if (localDay === yesterdayLocal) totalSec += ss.active_sec
+  }
+
+  return totalSec < goalSec
 }
 
 export function closeDb(): void {

@@ -48,6 +48,20 @@ export const BADGES: BadgeMeta[] = [
     description: '累计完成 50 次打卡',
     lore: '所有微小，都在悄悄堆成银河',
     color: '#e5e7eb'
+  },
+  {
+    code: 'first_shield',
+    name: '蓄光者',
+    description: '首次持有星辰盾',
+    lore: '盾牌升起，你有了第二次机会',
+    color: '#93c5fd'
+  },
+  {
+    code: 'shield_saver',
+    name: '救援者',
+    description: '累计使用星辰盾补签 5 次',
+    lore: '每一次挽救，都是不肯放弃',
+    color: '#fbbf24'
   }
 ]
 
