@@ -66,6 +66,43 @@ interface TodoData {
   deleted_at?: string
 }
 
+interface AchievementData {
+  id: string
+  code: string
+  unlocked_at: string
+  progress_snapshot?: string
+  is_silent: number
+  created_at: string
+  updated_at?: string
+  deleted_at?: string
+}
+
+interface BadgeEventData {
+  id: string
+  event_type: 'session_end' | 'card_review' | 'todo_complete'
+  habit_id?: string
+  session_id?: string
+  card_id?: string
+  todo_id?: string
+  started_at?: string
+  ended_at?: string
+  active_sec?: number
+  payload?: string
+  created_at: string
+  updated_at?: string
+  deleted_at?: string
+}
+
+interface UserProgressData {
+  level: number
+  xp: number
+  total_xp: number
+  total_stars: number
+  xp_multiplier: number
+  rebirth_count: number
+  updated_at: string
+}
+
 interface SyncStatusPayload {
   state: 'idle' | 'syncing' | 'error' | 'offline'
   lastSync: string | null
@@ -106,6 +143,13 @@ interface API {
   createTodo(data: { title: string; notes?: string; due_date: string; sort_order?: number }): Promise<TodoData>
   updateTodo(id: string, updates: Record<string, unknown>): Promise<TodoData>
   deleteTodo(id: string): Promise<{ ok: boolean }>
+
+  // Progress & Achievements
+  getProgress(): Promise<UserProgressData>
+  listAchievements(): Promise<AchievementData[]>
+  recomputeAchievements(): Promise<{ ok: boolean; progress: UserProgressData; unlocked: AchievementData[] }>
+  onProgressUpdated(callback: (payload: UserProgressData) => void): () => void
+  onAchievementUnlocked(callback: (payload: AchievementData) => void): () => void
 
   // Auth
   login(email: string, password: string): Promise<AuthResult>

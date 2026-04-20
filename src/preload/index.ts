@@ -63,6 +63,21 @@ const api = {
     ipcRenderer.invoke('todos:update', id, updates),
   deleteTodo: (id: string) => ipcRenderer.invoke('todos:delete', id),
 
+  // Progress & Achievements
+  getProgress: () => ipcRenderer.invoke('progress:get'),
+  listAchievements: () => ipcRenderer.invoke('achievements:list'),
+  recomputeAchievements: () => ipcRenderer.invoke('achievements:recompute'),
+  onProgressUpdated: (callback: (payload: unknown) => void) => {
+    const listener = (_e: unknown, payload: unknown) => callback(payload)
+    ipcRenderer.on('progress:updated', listener)
+    return () => { ipcRenderer.removeListener('progress:updated', listener) }
+  },
+  onAchievementUnlocked: (callback: (payload: unknown) => void) => {
+    const listener = (_e: unknown, payload: unknown) => callback(payload)
+    ipcRenderer.on('achievement:unlocked', listener)
+    return () => { ipcRenderer.removeListener('achievement:unlocked', listener) }
+  },
+
   // Window controls
   minimizeWindow: () => ipcRenderer.invoke('window:minimize'),
   closeWindow: () => ipcRenderer.invoke('window:close'),

@@ -1,6 +1,6 @@
 interface Props {
-  active: 'dashboard' | 'cards' | 'todos' | 'stats'
-  onChange: (tab: 'dashboard' | 'cards' | 'todos' | 'stats') => void
+  active: 'dashboard' | 'cards' | 'todos' | 'starry' | 'stats'
+  onChange: (tab: 'dashboard' | 'cards' | 'todos' | 'starry' | 'stats') => void
   dueCount?: number
   timerActive?: boolean
 }
@@ -72,6 +72,22 @@ function BottomNav({ active, onChange, dueCount, timerActive }: Props): JSX.Elem
         </svg>
         <span className="text-[10px] font-medium">待办</span>
         {active === 'todos' && (
+          <div className="w-1 h-1 rounded-full bg-accent-cyan shadow-[0_0_6px_rgba(0,229,255,0.5)]" />
+        )}
+      </button>
+
+      <button
+        onClick={() => !timerActive && onChange('starry')}
+        className={`flex flex-col items-center gap-0.5 px-4 py-1 rounded-lg transition-all ${
+          timerActive ? 'text-txt-muted/40 cursor-not-allowed' :
+          active === 'starry' ? 'text-accent-cyan' : 'text-txt-muted hover:text-txt-secondary'
+        }`}
+      >
+        <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+          <polygon points="12 2 15.09 8.26 22 9.27 17 14.14 18.18 21.02 12 17.77 5.82 21.02 7 14.14 2 9.27 8.91 8.26 12 2" />
+        </svg>
+        <span className="text-[10px] font-medium">星空</span>
+        {active === 'starry' && (
           <div className="w-1 h-1 rounded-full bg-accent-cyan shadow-[0_0_6px_rgba(0,229,255,0.5)]" />
         )}
       </button>

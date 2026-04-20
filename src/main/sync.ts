@@ -7,7 +7,10 @@ import {
   SessionRow,
   DeckRow,
   CardRow,
-  TodoRow
+  TodoRow,
+  AchievementRow,
+  BadgeEventRow,
+  UserProgress
 } from './db'
 
 export type SyncState = 'idle' | 'syncing' | 'error' | 'offline'
@@ -332,10 +335,175 @@ export async function runSync(): Promise<void> {
       }
     }
 
+    // First-time full push for achievements / badge_events (added in P1).
+    const achievementsFirstSync = !store.sync_meta.achievements_synced_once
+    const achievementsSince = achievementsFirstSync ? null : since
+    const badgeEventsFirstSync = !store.sync_meta.badge_events_synced_once
+    const badgeEventsSince = badgeEventsFirstSync ? null : since
+
+    // ========== Achievements PUSH ==========
+    const localAchievements = store.achievements.filter(
+      a => !achievementsSince || (a.updated_at && a.updated_at > achievementsSince)
+    )
+    if (localAchievements.length > 0) {
+      const rows = localAchievements.map(a => ({
+        id: a.id,
+        user_id: userId,
+        code: a.code,
+        unlocked_at: a.unlocked_at,
+        progress_snapshot: a.progress_snapshot || null,
+        is_silent: a.is_silent,
+        created_at: a.created_at,
+        updated_at: a.updated_at || a.created_at,
+        deleted_at: a.deleted_at || null
+      }))
+      await sb.from('achievements').upsert(rows, { onConflict: 'id' })
+    }
+
+    // ========== Achievements PULL ==========
+    let achievementsQuery = sb.from('achievements').select('*').eq('user_id', userId)
+    if (since) {
+      achievementsQuery = achievementsQuery.gt('updated_at', since)
+    }
+    const { data: remoteAchievements } = await achievementsQuery
+
+    if (remoteAchievements && remoteAchievements.length > 0) {
+      for (const remote of remoteAchievements) {
+        const localIdx = store.achievements.findIndex(a => a.id === remote.id)
+        const remoteRow: AchievementRow = {
+          id: remote.id,
+          code: remote.code,
+          unlocked_at: remote.unlocked_at,
+          progress_snapshot: remote.progress_snapshot || undefined,
+          is_silent: remote.is_silent,
+          created_at: remote.created_at,
+          updated_at: remote.updated_at,
+          deleted_at: remote.deleted_at || undefined
+        }
+
+        if (localIdx === -1) {
+          store.achievements.push(remoteRow)
+        } else {
+          const local = store.achievements[localIdx]
+          const localTime = local.updated_at || local.created_at
+          const remoteTime = remote.updated_at || remote.created_at
+          if (remoteTime > localTime) {
+            store.achievements[localIdx] = remoteRow
+          }
+        }
+      }
+    }
+
+    // ========== Badge Events PUSH ==========
+    const localBadgeEvents = store.badge_events.filter(
+      e => !badgeEventsSince || (e.updated_at && e.updated_at > badgeEventsSince)
+    )
+    if (localBadgeEvents.length > 0) {
+      const rows = localBadgeEvents.map(e => ({
+        id: e.id,
+        user_id: userId,
+        event_type: e.event_type,
+        habit_id: e.habit_id || null,
+        session_id: e.session_id || null,
+        card_id: e.card_id || null,
+        todo_id: e.todo_id || null,
+        started_at: e.started_at || null,
+        ended_at: e.ended_at || null,
+        active_sec: e.active_sec ?? null,
+        payload: e.payload || null,
+        created_at: e.created_at,
+        updated_at: e.updated_at || e.created_at,
+        deleted_at: e.deleted_at || null
+      }))
+      await sb.from('badge_events').upsert(rows, { onConflict: 'id' })
+    }
+
+    // ========== Badge Events PULL ==========
+    let badgeEventsQuery = sb.from('badge_events').select('*').eq('user_id', userId)
+    if (since) {
+      badgeEventsQuery = badgeEventsQuery.gt('updated_at', since)
+    }
+    const { data: remoteBadgeEvents } = await badgeEventsQuery
+
+    if (remoteBadgeEvents && remoteBadgeEvents.length > 0) {
+      for (const remote of remoteBadgeEvents) {
+        const localIdx = store.badge_events.findIndex(e => e.id === remote.id)
+        const remoteRow: BadgeEventRow = {
+          id: remote.id,
+          event_type: remote.event_type,
+          habit_id: remote.habit_id || undefined,
+          session_id: remote.session_id || undefined,
+          card_id: remote.card_id || undefined,
+          todo_id: remote.todo_id || undefined,
+          started_at: remote.started_at || undefined,
+          ended_at: remote.ended_at || undefined,
+          active_sec: remote.active_sec ?? undefined,
+          payload: remote.payload || undefined,
+          created_at: remote.created_at,
+          updated_at: remote.updated_at,
+          deleted_at: remote.deleted_at || undefined
+        }
+
+        if (localIdx === -1) {
+          store.badge_events.push(remoteRow)
+        } else {
+          const local = store.badge_events[localIdx]
+          const localTime = local.updated_at || local.created_at
+          const remoteTime = remote.updated_at || remote.created_at
+          if (remoteTime > localTime) {
+            store.badge_events[localIdx] = remoteRow
+          }
+        }
+      }
+    }
+
+    // ========== User Progress PUSH (to profiles row) ==========
+    const progress = store.user_progress
+    await sb.from('profiles').upsert(
+      {
+        id: userId,
+        level: progress.level,
+        xp: progress.xp,
+        total_xp: progress.total_xp,
+        total_stars: progress.total_stars,
+        xp_multiplier: progress.xp_multiplier,
+        rebirth_count: progress.rebirth_count
+      },
+      { onConflict: 'id' }
+    )
+
+    // ========== User Progress PULL (from profiles row, last-write-wins) ==========
+    const { data: remoteProfile } = await sb
+      .from('profiles')
+      .select('level, xp, total_xp, total_stars, xp_multiplier, rebirth_count')
+      .eq('id', userId)
+      .maybeSingle()
+
+    if (remoteProfile) {
+      const remoteProgress: UserProgress = {
+        level: remoteProfile.level ?? 1,
+        xp: remoteProfile.xp ?? 0,
+        total_xp: remoteProfile.total_xp ?? 0,
+        total_stars: remoteProfile.total_stars ?? 0,
+        xp_multiplier: remoteProfile.xp_multiplier ?? 1.0,
+        rebirth_count: remoteProfile.rebirth_count ?? 0,
+        updated_at: new Date().toISOString()
+      }
+      // Last-write-wins: prefer remote if it has more total_xp OR higher level
+      if (
+        remoteProgress.total_xp > progress.total_xp ||
+        remoteProgress.level > progress.level
+      ) {
+        store.user_progress = remoteProgress
+      }
+    }
+
     // Update sync timestamp
     store.sync_meta.last_sync_at = new Date().toISOString()
     store.sync_meta.cards_synced_once = true
     store.sync_meta.todos_synced_once = true
+    store.sync_meta.achievements_synced_once = true
+    store.sync_meta.badge_events_synced_once = true
     lastSyncAt = store.sync_meta.last_sync_at
     saveStore()
 

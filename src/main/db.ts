@@ -1,6 +1,7 @@
 import { app } from 'electron'
 import path from 'path'
 import fs from 'fs'
+import { randomUUID } from 'crypto'
 
 // ============ Types ============
 
@@ -34,6 +35,8 @@ interface SyncMeta {
   user_id: string | null
   cards_synced_once?: boolean
   todos_synced_once?: boolean
+  achievements_synced_once?: boolean
+  badge_events_synced_once?: boolean
 }
 
 export interface DeckRow {
@@ -69,15 +72,67 @@ export interface TodoRow {
   deleted_at?: string
 }
 
+export interface BadgeEventRow {
+  id: string                 // uuid
+  event_type: 'session_end' | 'card_review' | 'todo_complete'
+  habit_id?: string
+  session_id?: string
+  card_id?: string
+  todo_id?: string
+  started_at?: string        // ISO
+  ended_at?: string          // ISO
+  active_sec?: number
+  payload?: string           // JSON string for extra context
+  created_at: string         // ISO
+  updated_at?: string
+  deleted_at?: string
+}
+
+export interface AchievementRow {
+  id: string                 // uuid
+  code: string               // stable key
+  unlocked_at: string        // ISO
+  progress_snapshot?: string // JSON string
+  is_silent: number          // 0=normal, 1=silent (retroactive)
+  created_at: string
+  updated_at?: string
+  deleted_at?: string
+}
+
+export interface UserProgress {
+  level: number              // 1-20 cap for P1 (field supports 1-160 future)
+  xp: number                 // XP within current level
+  total_xp: number           // lifetime XP
+  total_stars: number        // lifetime stars earned (== total_xp for now)
+  xp_multiplier: number      // 1.0 default
+  rebirth_count: number      // 0 for P1
+  updated_at: string
+}
+
+function defaultUserProgress(): UserProgress {
+  return {
+    level: 1,
+    xp: 0,
+    total_xp: 0,
+    total_stars: 0,
+    xp_multiplier: 1.0,
+    rebirth_count: 0,
+    updated_at: new Date().toISOString()
+  }
+}
+
 // Ebbinghaus intervals in days: stage -> days until next review
 const EBBINGHAUS_INTERVALS = [0, 1, 2, 4, 7, 15, 30]
 
-interface StoreData {
+export interface StoreData {
   habits: HabitRow[]
   sessions: SessionRow[]
   decks: DeckRow[]
   cards: CardRow[]
   todos: TodoRow[]
+  achievements: AchievementRow[]
+  badge_events: BadgeEventRow[]
+  user_progress: UserProgress
   sync_meta?: SyncMeta
 }
 
@@ -97,7 +152,17 @@ function getDataPath(): string {
 export function loadStore(): StoreData {
   if (store) return store
   const filePath = getDataPath()
-  const empty: StoreData = { habits: [], sessions: [], decks: [], cards: [], todos: [], sync_meta: { last_sync_at: null, user_id: null } }
+  const empty: StoreData = {
+    habits: [],
+    sessions: [],
+    decks: [],
+    cards: [],
+    todos: [],
+    achievements: [],
+    badge_events: [],
+    user_progress: defaultUserProgress(),
+    sync_meta: { last_sync_at: null, user_id: null }
+  }
   if (fs.existsSync(filePath)) {
     try {
       store = JSON.parse(fs.readFileSync(filePath, 'utf-8'))
@@ -115,6 +180,10 @@ export function loadStore(): StoreData {
       if (!store.decks) store.decks = []
       if (!store.cards) store.cards = []
       if (!store.todos) store.todos = []
+      // Migrate: add achievements/badge_events/user_progress if missing
+      if (!store.achievements) store.achievements = []
+      if (!store.badge_events) store.badge_events = []
+      if (!store.user_progress) store.user_progress = defaultUserProgress()
     } catch {
       store = empty
     }
@@ -515,6 +584,82 @@ export function deleteTodo(id: string): void {
     s.todos[idx].updated_at = now
     saveStore()
   }
+}
+
+// ============ Badge Events ============
+
+export function appendBadgeEvent(event: Omit<BadgeEventRow, 'id' | 'created_at'>): BadgeEventRow {
+  const s = loadStore()
+  const now = new Date().toISOString()
+  const row: BadgeEventRow = {
+    id: randomUUID(),
+    event_type: event.event_type,
+    habit_id: event.habit_id,
+    session_id: event.session_id,
+    card_id: event.card_id,
+    todo_id: event.todo_id,
+    started_at: event.started_at,
+    ended_at: event.ended_at,
+    active_sec: event.active_sec,
+    payload: event.payload,
+    created_at: now,
+    updated_at: now,
+    deleted_at: event.deleted_at
+  }
+  s.badge_events.push(row)
+  saveStore()
+  return row
+}
+
+export function getAllBadgeEvents(): BadgeEventRow[] {
+  const s = loadStore()
+  return s.badge_events.filter(e => !e.deleted_at)
+}
+
+// ============ Achievements ============
+
+export function getAllAchievements(): AchievementRow[] {
+  const s = loadStore()
+  return s.achievements.filter(a => !a.deleted_at)
+}
+
+export function persistAchievement(ach: AchievementRow): AchievementRow {
+  const s = loadStore()
+  const now = new Date().toISOString()
+  // Idempotent by code: if an un-deleted achievement with this code exists, return it unchanged
+  const existing = s.achievements.find(a => a.code === ach.code && !a.deleted_at)
+  if (existing) return existing
+  const row: AchievementRow = {
+    ...ach,
+    updated_at: ach.updated_at || now
+  }
+  s.achievements.push(row)
+  saveStore()
+  return row
+}
+
+export function softDeleteAchievement(id: string): void {
+  const s = loadStore()
+  const idx = s.achievements.findIndex(a => a.id === id)
+  if (idx !== -1) {
+    const now = new Date().toISOString()
+    s.achievements[idx].deleted_at = now
+    s.achievements[idx].updated_at = now
+    saveStore()
+  }
+}
+
+// ============ User Progress ============
+
+export function getUserProgress(): UserProgress {
+  const s = loadStore()
+  return s.user_progress
+}
+
+export function setUserProgress(next: UserProgress): void {
+  const s = loadStore()
+  s.user_progress = { ...next, updated_at: new Date().toISOString() }
+  saveStore()
 }
 
 export function closeDb(): void {

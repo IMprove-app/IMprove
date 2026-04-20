@@ -28,11 +28,54 @@ import {
   createTodo,
   updateTodo,
   deleteTodo,
+  loadStore,
+  saveStore,
+  appendBadgeEvent,
+  getAllAchievements,
+  persistAchievement,
+  getUserProgress,
+  setUserProgress,
   HabitRow,
-  TodoRow
+  TodoRow,
+  AchievementRow,
+  UserProgress,
+  BadgeEventRow
 } from './db'
 import { signUp, signIn, signOut, getAuthStatus } from './supabase'
 import { runSync, getSyncStatus } from './sync'
+import { getMainWindow } from './index'
+
+interface SessionEndOutcome {
+  xpGained: number
+  newAchievements: AchievementRow[]
+  newProgress: UserProgress
+}
+
+// Dynamically load achievements evaluator (Agent B). Fallback = no-op if missing.
+async function safeEvaluateSessionEnd(
+  event: BadgeEventRow
+): Promise<SessionEndOutcome> {
+  const store = loadStore()
+  const currentProgress = getUserProgress()
+  try {
+    const mod = await import('./achievements')
+    if (mod && typeof mod.evaluateSessionEnd === 'function') {
+      const outcome = mod.evaluateSessionEnd(store, event)
+      return {
+        xpGained: outcome?.xpGained ?? 0,
+        newAchievements: outcome?.newAchievements ?? [],
+        newProgress: outcome?.newProgress ?? currentProgress
+      }
+    }
+  } catch {
+    // Agent B's achievements module not yet available — fall through to fallback.
+  }
+  return {
+    xpGained: 0,
+    newAchievements: [],
+    newProgress: currentProgress
+  }
+}
 
 export function registerIpcHandlers(): void {
   // ====== Habits ======
@@ -92,11 +135,38 @@ export function registerIpcHandlers(): void {
     return session
   })
 
-  ipcMain.handle('session:stop', (_e, sessionId: string, activeSec: number) => {
+  ipcMain.handle('session:stop', async (_e, sessionId: string, activeSec: number) => {
+    const endedAt = new Date().toISOString()
     updateSession(sessionId, {
-      ended_at: new Date().toISOString(),
+      ended_at: endedAt,
       active_sec: activeSec
     })
+
+    // Locate the just-ended session in the store to build a badge event
+    const store = loadStore()
+    const session = store.sessions.find(s => s.id === sessionId)
+    if (!session) return { ok: true }
+
+    const event = appendBadgeEvent({
+      event_type: 'session_end',
+      habit_id: session.habit_id,
+      session_id: session.id,
+      started_at: session.started_at,
+      ended_at: session.ended_at ?? endedAt,
+      active_sec: activeSec
+    })
+
+    const outcome = await safeEvaluateSessionEnd(event)
+    for (const ach of outcome.newAchievements) persistAchievement(ach)
+    setUserProgress(outcome.newProgress)
+    saveStore()
+
+    const win = getMainWindow()
+    win?.webContents.send('progress:updated', outcome.newProgress)
+    for (const ach of outcome.newAchievements) {
+      win?.webContents.send('achievement:unlocked', ach)
+    }
+
     return { ok: true }
   })
 
@@ -218,6 +288,42 @@ export function registerIpcHandlers(): void {
   ipcMain.handle('todos:delete', (_e, id: string) => {
     deleteTodo(id)
     return { ok: true }
+  })
+
+  // ====== Progress & Achievements ======
+  ipcMain.handle('progress:get', () => {
+    return getUserProgress()
+  })
+
+  ipcMain.handle('achievements:list', () => {
+    return getAllAchievements()
+  })
+
+  ipcMain.handle('achievements:recompute', async () => {
+    try {
+      const mod = await import('./achievements')
+      if (mod && typeof mod.recomputeAll === 'function') {
+        const outcome = mod.recomputeAll(loadStore())
+        if (outcome?.newAchievements) {
+          for (const ach of outcome.newAchievements) persistAchievement(ach)
+        }
+        if (outcome?.newProgress) {
+          setUserProgress(outcome.newProgress)
+        }
+        saveStore()
+
+        const win = getMainWindow()
+        const progress = getUserProgress()
+        win?.webContents.send('progress:updated', progress)
+        for (const ach of outcome?.newAchievements ?? []) {
+          win?.webContents.send('achievement:unlocked', ach)
+        }
+        return { ok: true, progress, unlocked: outcome?.newAchievements ?? [] }
+      }
+    } catch {
+      // Agent B module not available
+    }
+    return { ok: false, progress: getUserProgress(), unlocked: [] }
   })
 
   // ====== Window Controls ======

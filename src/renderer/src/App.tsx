@@ -9,8 +9,10 @@ import Settings from './pages/Settings'
 import Auth from './pages/Auth'
 import CardsPage from './pages/CardsPage'
 import TodosPage from './pages/TodosPage'
+import StarrySkyPage from './pages/StarrySkyPage'
 import PostSessionCards from './components/PostSessionCards'
 import UpdateBanner from './components/UpdateBanner'
+import AchievementToast from './components/AchievementToast'
 
 export interface ActiveSession {
   sessionId: string
@@ -25,7 +27,7 @@ export interface ActiveSession {
 function App(): JSX.Element {
   const [activeSession, setActiveSession] = useState<ActiveSession | null>(null)
   const [refreshKey, setRefreshKey] = useState(0)
-  const [tab, setTab] = useState<'dashboard' | 'cards' | 'todos' | 'stats'>('dashboard')
+  const [tab, setTab] = useState<'dashboard' | 'cards' | 'todos' | 'starry' | 'stats'>('dashboard')
   const [timerTab, setTimerTab] = useState<'timer' | 'cards'>('timer')
   const [showSettings, setShowSettings] = useState(false)
   const [authChecked, setAuthChecked] = useState(false)
@@ -103,6 +105,7 @@ function App(): JSX.Element {
     <div className="h-screen flex flex-col bg-bg-deep">
       <Titlebar loggedIn={loggedIn} />
       <UpdateBanner />
+      <AchievementToast />
       {/* Keep Timer mounted (hidden) when switching to cards during session */}
       {activeSession && (
         <div className={timerTab === 'cards' ? 'hidden' : 'flex-1 flex flex-col overflow-hidden'}>
@@ -142,6 +145,8 @@ function App(): JSX.Element {
               <CardsPage key="cards" />
             ) : tab === 'todos' ? (
               <TodosPage key="todos" />
+            ) : tab === 'starry' ? (
+              <StarrySkyPage key="starry" />
             ) : (
               <Stats key="stats" />
             )}
