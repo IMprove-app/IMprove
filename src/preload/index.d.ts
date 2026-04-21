@@ -83,6 +83,26 @@ interface TodoData {
   deleted_at?: string
 }
 
+interface SnippetFolderData {
+  id: string
+  name: string
+  sort_order: number
+  created_at: string
+  updated_at?: string
+  deleted_at?: string
+}
+
+interface SnippetData {
+  id: string
+  folder_id?: string
+  title: string
+  content: string
+  sort_order: number
+  created_at: string
+  updated_at?: string
+  deleted_at?: string
+}
+
 interface AchievementData {
   id: string
   code: string
@@ -178,6 +198,33 @@ interface API {
 
   // Star Shields (P2b)
   redeemShield(habitId: string): Promise<{ ok: boolean; reason?: string; progress?: UserProgressData }>
+
+  // Snippet folders
+  listSnippetFolders(): Promise<SnippetFolderData[]>
+  createSnippetFolder(data: { name: string; sort_order?: number }): Promise<SnippetFolderData>
+  updateSnippetFolder(id: string, updates: Record<string, unknown>): Promise<SnippetFolderData>
+  deleteSnippetFolder(id: string): Promise<{ ok: boolean }>
+  onSnippetFoldersChanged(callback: () => void): () => void
+
+  // Snippet HUD
+  listSnippets(folderId?: string): Promise<SnippetData[]>
+  createSnippet(data: { title?: string; content: string; folder_id?: string; sort_order?: number }): Promise<SnippetData>
+  updateSnippet(id: string, updates: Record<string, unknown>): Promise<SnippetData>
+  deleteSnippet(id: string): Promise<{ ok: boolean }>
+  copySnippet(id: string): Promise<{ ok: boolean; reason?: string }>
+  onSnippetsChanged(callback: () => void): () => void
+
+  // HUD window
+  toggleHud(): Promise<void>
+  hideHud(): Promise<void>
+  getHudPinned(): Promise<boolean>
+  setHudPinned(pinned: boolean): Promise<{ ok: boolean }>
+  onHudPinnedChanged(callback: (pinned: boolean) => void): () => void
+
+  // Hotkey
+  getHudHotkey(): Promise<string>
+  setHudHotkey(accel: string): Promise<{ ok: boolean; error?: string; active?: string }>
+  onHotkeyConflict(callback: (payload: { accel: string; error?: string }) => void): () => void
 
   // Progress & Achievements
   getProgress(): Promise<UserProgressData>

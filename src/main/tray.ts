@@ -36,19 +36,29 @@ function createTrayIcon(): Electron.NativeImage {
   return nativeImage.createFromBuffer(buf, { width: size, height: size })
 }
 
-export function createTray(mainWindow: BrowserWindow): Tray {
+export function createTray(mainWindow: BrowserWindow, onToggleHud?: () => void): Tray {
   const icon = createTrayIcon()
   tray = new Tray(icon)
   tray.setToolTip('IMprove - 每日打卡')
 
-  const contextMenu = Menu.buildFromTemplate([
+  const items: Electron.MenuItemConstructorOptions[] = [
     {
       label: '打开主界面',
       click: () => {
         mainWindow.show()
         mainWindow.focus()
       }
-    },
+    }
+  ]
+
+  if (onToggleHud) {
+    items.push({
+      label: '快速粘贴 HUD',
+      click: () => onToggleHud()
+    })
+  }
+
+  items.push(
     { type: 'separator' },
     {
       label: '退出',
@@ -58,8 +68,9 @@ export function createTray(mainWindow: BrowserWindow): Tray {
         app.quit()
       }
     }
-  ])
+  )
 
+  const contextMenu = Menu.buildFromTemplate(items)
   tray.setContextMenu(contextMenu)
 
   tray.on('click', () => {

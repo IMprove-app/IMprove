@@ -1,4 +1,4 @@
-import { ipcMain, shell, BrowserWindow } from 'electron'
+import { ipcMain, shell, BrowserWindow, clipboard } from 'electron'
 import { v4 as uuidv4 } from 'uuid'
 import { exec } from 'child_process'
 import {
@@ -40,15 +40,42 @@ import {
   createShieldSession,
   wasMissedYesterday,
   currentMonthKey,
+  getAllSnippets,
+  createSnippet,
+  updateSnippet as dbUpdateSnippet,
+  deleteSnippet,
+  touchSnippet,
+  getAllSnippetFolders,
+  createSnippetFolder,
+  updateSnippetFolder as dbUpdateSnippetFolder,
+  deleteSnippetFolder,
+  getSettings,
+  updateSettings,
   HabitRow,
   TodoRow,
   AchievementRow,
   UserProgress,
-  BadgeEventRow
+  BadgeEventRow,
+  SnippetRow,
+  SnippetFolderRow
 } from './db'
 import { signUp, signIn, signOut, getAuthStatus } from './supabase'
 import { runSync, getSyncStatus } from './sync'
 import { getMainWindow } from './index'
+import { toggleHud, hideHud, setHudPinned } from './hud'
+import { setHudHotkey, getRegisteredHotkey } from './hotkey'
+
+function broadcastSnippetsChanged(): void {
+  for (const win of BrowserWindow.getAllWindows()) {
+    if (!win.isDestroyed()) win.webContents.send('snippets:changed')
+  }
+}
+
+function broadcastSnippetFoldersChanged(): void {
+  for (const win of BrowserWindow.getAllWindows()) {
+    if (!win.isDestroyed()) win.webContents.send('snippet-folders:changed')
+  }
+}
 
 interface SessionEndOutcome {
   xpGained: number
@@ -432,12 +459,134 @@ export function registerIpcHandlers(): void {
     return { ok: true, progress: finalProgress }
   })
 
+  // ====== Snippet Folders (速贴分组) ======
+  ipcMain.handle('snippet-folders:list', () => {
+    return getAllSnippetFolders()
+  })
+
+  ipcMain.handle(
+    'snippet-folders:create',
+    (_e, data: { name: string; sort_order?: number }) => {
+      const row = createSnippetFolder({
+        id: uuidv4(),
+        name: data.name || '未命名',
+        sort_order: data.sort_order
+      })
+      broadcastSnippetFoldersChanged()
+      return row
+    }
+  )
+
+  ipcMain.handle(
+    'snippet-folders:update',
+    (_e, id: string, updates: Partial<SnippetFolderRow>) => {
+      const row = dbUpdateSnippetFolder(id, updates)
+      broadcastSnippetFoldersChanged()
+      return row
+    }
+  )
+
+  ipcMain.handle('snippet-folders:delete', (_e, id: string) => {
+    deleteSnippetFolder(id)
+    broadcastSnippetFoldersChanged()
+    // Folder delete cascades to snippets — let the HUD/Settings page refresh both.
+    broadcastSnippetsChanged()
+    return { ok: true }
+  })
+
+  // ====== Snippets (快速粘贴 HUD) ======
+  ipcMain.handle('snippets:list', (_e, folderId?: string) => {
+    return getAllSnippets(folderId)
+  })
+
+  ipcMain.handle(
+    'snippets:create',
+    (_e, data: { title?: string; content: string; folder_id?: string; sort_order?: number }) => {
+      const row = createSnippet({
+        id: uuidv4(),
+        folder_id: data.folder_id,
+        title: data.title || '',
+        content: data.content || '',
+        sort_order: data.sort_order
+      })
+      broadcastSnippetsChanged()
+      return row
+    }
+  )
+
+  ipcMain.handle('snippets:update', (_e, id: string, updates: Partial<SnippetRow>) => {
+    const row = dbUpdateSnippet(id, updates)
+    broadcastSnippetsChanged()
+    return row
+  })
+
+  ipcMain.handle('snippets:delete', (_e, id: string) => {
+    deleteSnippet(id)
+    broadcastSnippetsChanged()
+    return { ok: true }
+  })
+
+  ipcMain.handle('snippets:copy', (_e, id: string) => {
+    const all = getAllSnippets()
+    const target = all.find(sn => sn.id === id)
+    if (!target) return { ok: false, reason: 'not found' }
+    clipboard.writeText(target.content)
+    // Bumping updated_at keeps recently-used snippets sortable if we ever want MRU order.
+    touchSnippet(id)
+    broadcastSnippetsChanged()
+    return { ok: true }
+  })
+
+  // ====== HUD Window ======
+  ipcMain.handle('hud:toggle', () => {
+    toggleHud()
+  })
+
+  ipcMain.handle('hud:hide', () => {
+    hideHud()
+  })
+
+  ipcMain.handle('hud:get-pinned', () => {
+    return getSettings().hudPinned === true
+  })
+
+  ipcMain.handle('hud:set-pinned', (_e, pinned: boolean) => {
+    setHudPinned(!!pinned)
+    // Broadcast so both main window (Settings page) and HUD stay in sync.
+    for (const win of BrowserWindow.getAllWindows()) {
+      if (!win.isDestroyed()) win.webContents.send('hud:pinned-changed', !!pinned)
+    }
+    return { ok: true }
+  })
+
+  // ====== Settings (hotkey) ======
+  ipcMain.handle('settings:get-hotkey', () => {
+    return getSettings().hudHotkey ?? ''
+  })
+
+  ipcMain.handle('settings:set-hotkey', (_e, accel: string) => {
+    const outcome = setHudHotkey(accel)
+    if (!outcome.ok) {
+      const win = getMainWindow()
+      win?.webContents.send('hotkey:conflict', { accel, error: outcome.error })
+    }
+    return { ...outcome, active: getRegisteredHotkey() }
+  })
+
   // ====== Window Controls ======
   ipcMain.handle('window:minimize', (e) => {
     BrowserWindow.fromWebContents(e.sender)?.minimize()
   })
 
   ipcMain.handle('window:close', (e) => {
-    BrowserWindow.fromWebContents(e.sender)?.close()
+    // Snippet HUD should just hide on close-button click, not exit the whole thing.
+    const sender = BrowserWindow.fromWebContents(e.sender)
+    if (!sender) return
+    const main = getMainWindow()
+    if (main && sender.id !== main.id) {
+      sender.hide()
+      return
+    }
+    sender.close()
   })
 }

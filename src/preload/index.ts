@@ -66,6 +66,53 @@ const api = {
   // Star Shields (P2b)
   redeemShield: (habitId: string) => ipcRenderer.invoke('shield:redeem', habitId),
 
+  // Snippet folders
+  listSnippetFolders: () => ipcRenderer.invoke('snippet-folders:list'),
+  createSnippetFolder: (data: { name: string; sort_order?: number }) =>
+    ipcRenderer.invoke('snippet-folders:create', data),
+  updateSnippetFolder: (id: string, updates: Record<string, unknown>) =>
+    ipcRenderer.invoke('snippet-folders:update', id, updates),
+  deleteSnippetFolder: (id: string) => ipcRenderer.invoke('snippet-folders:delete', id),
+  onSnippetFoldersChanged: (callback: () => void) => {
+    const handler = (): void => callback()
+    ipcRenderer.on('snippet-folders:changed', handler)
+    return () => { ipcRenderer.removeListener('snippet-folders:changed', handler) }
+  },
+
+  // Snippet HUD
+  listSnippets: (folderId?: string) => ipcRenderer.invoke('snippets:list', folderId),
+  createSnippet: (data: { title?: string; content: string; folder_id?: string; sort_order?: number }) =>
+    ipcRenderer.invoke('snippets:create', data),
+  updateSnippet: (id: string, updates: Record<string, unknown>) =>
+    ipcRenderer.invoke('snippets:update', id, updates),
+  deleteSnippet: (id: string) => ipcRenderer.invoke('snippets:delete', id),
+  copySnippet: (id: string) => ipcRenderer.invoke('snippets:copy', id),
+  onSnippetsChanged: (callback: () => void) => {
+    const handler = (): void => callback()
+    ipcRenderer.on('snippets:changed', handler)
+    return () => { ipcRenderer.removeListener('snippets:changed', handler) }
+  },
+
+  // HUD window
+  toggleHud: () => ipcRenderer.invoke('hud:toggle'),
+  hideHud: () => ipcRenderer.invoke('hud:hide'),
+  getHudPinned: () => ipcRenderer.invoke('hud:get-pinned'),
+  setHudPinned: (pinned: boolean) => ipcRenderer.invoke('hud:set-pinned', pinned),
+  onHudPinnedChanged: (callback: (pinned: boolean) => void) => {
+    const handler = (_e: unknown, pinned: boolean): void => callback(pinned)
+    ipcRenderer.on('hud:pinned-changed', handler)
+    return () => { ipcRenderer.removeListener('hud:pinned-changed', handler) }
+  },
+
+  // Settings (hotkey)
+  getHudHotkey: () => ipcRenderer.invoke('settings:get-hotkey'),
+  setHudHotkey: (accel: string) => ipcRenderer.invoke('settings:set-hotkey', accel),
+  onHotkeyConflict: (callback: (payload: { accel: string; error?: string }) => void) => {
+    const handler = (_e: unknown, payload: { accel: string; error?: string }): void => callback(payload)
+    ipcRenderer.on('hotkey:conflict', handler)
+    return () => { ipcRenderer.removeListener('hotkey:conflict', handler) }
+  },
+
   // Progress & Achievements
   getProgress: () => ipcRenderer.invoke('progress:get'),
   listAchievements: () => ipcRenderer.invoke('achievements:list'),

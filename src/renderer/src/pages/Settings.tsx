@@ -1,6 +1,27 @@
 import { useState, useEffect } from 'react'
-import { motion } from 'framer-motion'
+import { motion, AnimatePresence } from 'framer-motion'
 import { getReduceMotionPref, setReduceMotion } from '../lib/motionPrefs'
+import HotkeyCapture from '../components/HotkeyCapture'
+
+const DEFAULT_HUD_HOTKEY = 'CommandOrControl+Shift+E'
+
+interface SnippetData {
+  id: string
+  folder_id?: string
+  title: string
+  content: string
+  sort_order: number
+  created_at: string
+  updated_at?: string
+}
+
+interface SnippetFolderData {
+  id: string
+  name: string
+  sort_order: number
+  created_at: string
+  updated_at?: string
+}
 
 interface Props {
   onBack: () => void
@@ -26,6 +47,19 @@ function Settings({ onBack, loggedIn, onLogout, onLogin }: Props): JSX.Element {
   // null = 跟随系统; true = 强制减弱; false = 强制启用
   const [reduceMotionPref, setReduceMotionPref] = useState<boolean | null>(getReduceMotionPref())
 
+  // Snippet HUD state
+  const [hudHotkey, setHudHotkey] = useState<string>('')
+  const [hudPinned, setHudPinned] = useState(false)
+  const [snippets, setSnippets] = useState<SnippetData[]>([])
+  const [folders, setFolders] = useState<SnippetFolderData[]>([])
+  const [editingId, setEditingId] = useState<string | null>(null)
+  const [editTitle, setEditTitle] = useState('')
+  const [editContent, setEditContent] = useState('')
+  const [addingSnippet, setAddingSnippet] = useState(false)
+  const [newTitle, setNewTitle] = useState('')
+  const [newContent, setNewContent] = useState('')
+  const [newFolderId, setNewFolderId] = useState<string>('')
+
   useEffect(() => {
     if (loggedIn) {
       window.api.getAuthStatus().then(s => {
@@ -36,6 +70,95 @@ function Settings({ onBack, loggedIn, onLogout, onLogin }: Props): JSX.Element {
       })
     }
   }, [loggedIn])
+
+  // Load HUD hotkey + pinned + snippets + folders
+  useEffect(() => {
+    window.api.getHudHotkey().then(setHudHotkey).catch(() => {})
+    window.api.getHudPinned().then(setHudPinned).catch(() => {})
+    const loadSnippets = (): void => {
+      window.api.listSnippets().then(list => setSnippets(list as SnippetData[])).catch(() => {})
+    }
+    const loadFolders = (): void => {
+      window.api.listSnippetFolders().then(list => setFolders(list as SnippetFolderData[])).catch(() => {})
+    }
+    loadSnippets()
+    loadFolders()
+    const off = window.api.onSnippetsChanged(loadSnippets)
+    const offFolders = window.api.onSnippetFoldersChanged(loadFolders)
+    const offPin = window.api.onHudPinnedChanged(setHudPinned)
+    return () => {
+      off()
+      offFolders()
+      offPin()
+    }
+  }, [])
+
+  // Pick a sensible default folder for the add form whenever folders change.
+  useEffect(() => {
+    if (!newFolderId && folders.length > 0) {
+      setNewFolderId(folders[0].id)
+    }
+    // If the selected folder was deleted, reset to the first available.
+    if (newFolderId && !folders.some(f => f.id === newFolderId)) {
+      setNewFolderId(folders[0]?.id || '')
+    }
+  }, [folders, newFolderId])
+
+  const handleSetHotkey = async (accel: string): Promise<{ ok: boolean; error?: string; active?: string }> => {
+    const result = await window.api.setHudHotkey(accel)
+    if (result.ok) setHudHotkey(accel)
+    return result
+  }
+
+  const handleTogglePinned = async (): Promise<void> => {
+    const next = !hudPinned
+    setHudPinned(next)
+    await window.api.setHudPinned(next)
+  }
+
+  const handleAddSnippet = async (): Promise<void> => {
+    const content = newContent.trim()
+    if (!content) return
+    // Must have a folder target — if none, auto-create a default folder first.
+    let targetFolderId = newFolderId
+    if (!targetFolderId) {
+      const created = await window.api.createSnippetFolder({ name: '默认' })
+      targetFolderId = created.id
+      setNewFolderId(created.id)
+    }
+    await window.api.createSnippet({
+      folder_id: targetFolderId,
+      title: newTitle.trim(),
+      content
+    })
+    setNewTitle('')
+    setNewContent('')
+    setAddingSnippet(false)
+  }
+
+  const handleBeginEdit = (sn: SnippetData): void => {
+    setEditingId(sn.id)
+    setEditTitle(sn.title)
+    setEditContent(sn.content)
+  }
+
+  const handleSaveEdit = async (): Promise<void> => {
+    if (!editingId) return
+    await window.api.updateSnippet(editingId, {
+      title: editTitle.trim(),
+      content: editContent.trim()
+    })
+    setEditingId(null)
+  }
+
+  const handleDeleteSnippet = async (id: string): Promise<void> => {
+    await window.api.deleteSnippet(id)
+    if (editingId === id) setEditingId(null)
+  }
+
+  const handleOpenHud = async (): Promise<void> => {
+    await window.api.toggleHud()
+  }
 
   const updateReduceMotion = (value: boolean | null): void => {
     setReduceMotion(value)
@@ -187,6 +310,247 @@ function Settings({ onBack, loggedIn, onLogout, onLogin }: Props): JSX.Element {
               </motion.button>
             )
           })}
+        </div>
+      </div>
+
+      {/* Snippet HUD (速贴) */}
+      <div className="glass-card p-4 mb-4">
+        <div className="flex items-center justify-between mb-3">
+          <h3 className="text-sm font-semibold text-txt-secondary">速贴 · 剪贴片段</h3>
+          <motion.button
+            onClick={handleOpenHud}
+            className="text-[10px] px-2 py-1 rounded-md bg-accent-cyan/10 text-accent-cyan border border-accent-cyan/20 hover:bg-accent-cyan/20 transition-colors"
+            whileTap={{ scale: 0.95 }}
+          >
+            打开 HUD
+          </motion.button>
+        </div>
+
+        {/* Hotkey */}
+        <div className="mb-3">
+          <p className="text-[11px] text-txt-primary font-medium mb-1.5">唤醒快捷键</p>
+          <HotkeyCapture
+            value={hudHotkey}
+            onChange={handleSetHotkey}
+            defaultAccel={DEFAULT_HUD_HOTKEY}
+          />
+        </div>
+
+        {/* Pin default */}
+        <div className="mb-3 flex items-center justify-between">
+          <div>
+            <p className="text-[11px] text-txt-primary font-medium">默认置顶在最前方</p>
+            <p className="text-[10px] text-txt-muted mt-0.5">复制后不自动收起，适合连续查找多条内容</p>
+          </div>
+          <button
+            onClick={handleTogglePinned}
+            className={`relative w-10 h-5 rounded-full transition-colors ${
+              hudPinned ? 'bg-accent-cyan' : 'bg-bg-border'
+            }`}
+          >
+            <span
+              className="absolute top-0.5 w-4 h-4 bg-white rounded-full shadow transition-transform"
+              style={{ transform: hudPinned ? 'translateX(22px)' : 'translateX(2px)' }}
+            />
+          </button>
+        </div>
+
+        {/* Snippet list */}
+        <div className="pt-2 border-t border-bg-border">
+          <div className="flex items-center justify-between mb-2">
+            <p className="text-[11px] text-txt-secondary font-medium">管理片段 ({snippets.length})</p>
+            {!addingSnippet && (
+              <button
+                onClick={() => setAddingSnippet(true)}
+                className="text-[10px] px-2 py-0.5 rounded-md bg-accent-cyan/10 text-accent-cyan border border-accent-cyan/20 hover:bg-accent-cyan/20 transition-colors"
+              >
+                + 新建
+              </button>
+            )}
+          </div>
+
+          <AnimatePresence>
+            {addingSnippet && (
+              <motion.div
+                initial={{ opacity: 0, height: 0 }}
+                animate={{ opacity: 1, height: 'auto' }}
+                exit={{ opacity: 0, height: 0 }}
+                className="overflow-hidden"
+              >
+                <div className="p-2.5 mb-2 rounded-lg bg-bg-elevated border border-accent-cyan/20 space-y-2">
+                  {folders.length > 0 && (
+                    <select
+                      value={newFolderId}
+                      onChange={e => setNewFolderId(e.target.value)}
+                      className="w-full text-xs px-2 py-1 rounded bg-bg-card border border-bg-border focus:outline-none focus:border-accent-cyan/50"
+                    >
+                      {folders.map(f => (
+                        <option key={f.id} value={f.id}>{f.name || '未命名文件夹'}</option>
+                      ))}
+                    </select>
+                  )}
+                  <input
+                    value={newTitle}
+                    onChange={e => setNewTitle(e.target.value)}
+                    placeholder="标题 (可选)"
+                    className="w-full text-xs px-2 py-1 rounded bg-bg-card border border-bg-border focus:outline-none focus:border-accent-cyan/50"
+                  />
+                  <textarea
+                    value={newContent}
+                    onChange={e => setNewContent(e.target.value)}
+                    placeholder="粘贴内容..."
+                    rows={3}
+                    className="w-full text-xs px-2 py-1 rounded bg-bg-card border border-bg-border focus:outline-none focus:border-accent-cyan/50 resize-none font-mono"
+                  />
+                  <div className="flex gap-2 justify-end">
+                    <button
+                      onClick={() => { setAddingSnippet(false); setNewTitle(''); setNewContent('') }}
+                      className="text-[10px] px-3 py-1 rounded-md text-txt-secondary hover:bg-bg-border transition-colors"
+                    >
+                      取消
+                    </button>
+                    <button
+                      onClick={handleAddSnippet}
+                      disabled={!newContent.trim()}
+                      className="text-[10px] px-3 py-1 rounded-md bg-accent-cyan text-white disabled:opacity-40 hover:opacity-90 transition-opacity"
+                    >
+                      保存
+                    </button>
+                  </div>
+                </div>
+              </motion.div>
+            )}
+          </AnimatePresence>
+
+          {snippets.length === 0 && !addingSnippet ? (
+            <p className="text-[10px] text-txt-muted text-center py-3">
+              还没有片段，可在 HUD 中创建文件夹与片段
+            </p>
+          ) : (
+            <div className="space-y-3">
+              {folders.map(folder => {
+                const folderSnippets = snippets.filter(sn => sn.folder_id === folder.id)
+                if (folderSnippets.length === 0) return null
+                return (
+                  <div key={folder.id} className="space-y-1.5">
+                    <p className="text-[10px] text-txt-muted font-medium px-1 flex items-center gap-1">
+                      <svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.2" strokeLinecap="round" strokeLinejoin="round">
+                        <path d="M22 19a2 2 0 0 1-2 2H4a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h5l2 3h9a2 2 0 0 1 2 2z" />
+                      </svg>
+                      {folder.name || '未命名文件夹'}
+                      <span className="text-txt-muted/70">· {folderSnippets.length}</span>
+                    </p>
+                    {folderSnippets.map(sn => {
+                      const isEditing = editingId === sn.id
+                      return (
+                        <div
+                          key={sn.id}
+                          className="rounded-lg bg-bg-elevated/60 border border-bg-border p-2"
+                        >
+                          {isEditing ? (
+                            <div className="space-y-2">
+                              <input
+                                value={editTitle}
+                                onChange={e => setEditTitle(e.target.value)}
+                                placeholder="标题 (可选)"
+                                className="w-full text-xs px-2 py-1 rounded bg-bg-card border border-bg-border focus:outline-none focus:border-accent-cyan/50"
+                              />
+                              <textarea
+                                value={editContent}
+                                onChange={e => setEditContent(e.target.value)}
+                                rows={3}
+                                className="w-full text-xs px-2 py-1 rounded bg-bg-card border border-bg-border focus:outline-none focus:border-accent-cyan/50 resize-none font-mono"
+                              />
+                              <div className="flex gap-2 justify-end">
+                                <button
+                                  onClick={() => handleDeleteSnippet(sn.id)}
+                                  className="text-[10px] px-3 py-1 rounded-md text-danger hover:bg-danger/10 transition-colors mr-auto"
+                                >
+                                  删除
+                                </button>
+                                <button
+                                  onClick={() => setEditingId(null)}
+                                  className="text-[10px] px-3 py-1 rounded-md text-txt-secondary hover:bg-bg-border transition-colors"
+                                >
+                                  取消
+                                </button>
+                                <button
+                                  onClick={handleSaveEdit}
+                                  className="text-[10px] px-3 py-1 rounded-md bg-accent-cyan text-white hover:opacity-90 transition-opacity"
+                                >
+                                  保存
+                                </button>
+                              </div>
+                            </div>
+                          ) : (
+                            <div className="flex items-start justify-between gap-2">
+                              <div className="min-w-0 flex-1">
+                                {sn.title && (
+                                  <p className="text-[11px] font-semibold text-txt-primary truncate">
+                                    {sn.title}
+                                  </p>
+                                )}
+                                <p
+                                  className={`text-[10px] text-txt-secondary font-mono truncate ${
+                                    sn.title ? 'mt-0.5' : ''
+                                  }`}
+                                >
+                                  {sn.content.split('\n')[0] || '(空)'}
+                                </p>
+                              </div>
+                              <button
+                                onClick={() => handleBeginEdit(sn)}
+                                className="text-[10px] px-2 py-0.5 rounded-md text-txt-secondary hover:bg-bg-border transition-colors flex-shrink-0"
+                              >
+                                编辑
+                              </button>
+                            </div>
+                          )}
+                        </div>
+                      )
+                    })}
+                  </div>
+                )
+              })}
+              {/* Orphan snippets (folder_id missing or pointing at a deleted folder) */}
+              {(() => {
+                const orphans = snippets.filter(
+                  sn => !sn.folder_id || !folders.some(f => f.id === sn.folder_id)
+                )
+                if (orphans.length === 0) return null
+                return (
+                  <div className="space-y-1.5">
+                    <p className="text-[10px] text-txt-muted font-medium px-1">未分组 · {orphans.length}</p>
+                    {orphans.map(sn => (
+                      <div
+                        key={sn.id}
+                        className="rounded-lg bg-bg-elevated/60 border border-bg-border p-2"
+                      >
+                        <div className="flex items-start justify-between gap-2">
+                          <div className="min-w-0 flex-1">
+                            {sn.title && (
+                              <p className="text-[11px] font-semibold text-txt-primary truncate">
+                                {sn.title}
+                              </p>
+                            )}
+                            <p className="text-[10px] text-txt-secondary font-mono truncate mt-0.5">
+                              {sn.content.split('\n')[0] || '(空)'}
+                            </p>
+                          </div>
+                          <button
+                            onClick={() => handleDeleteSnippet(sn.id)}
+                            className="text-[10px] px-2 py-0.5 rounded-md text-danger hover:bg-danger/10 transition-colors flex-shrink-0"
+                          >
+                            删除
+                          </button>
+                        </div>
+                      </div>
+                    ))}
+                  </div>
+                )
+              })()}
+            </div>
+          )}
         </div>
       </div>
 

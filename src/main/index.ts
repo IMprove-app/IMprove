@@ -7,6 +7,8 @@ import { closeDb } from './db'
 import { createTray } from './tray'
 import { initSupabase, getAuthStatus } from './supabase'
 import { runSync, startPeriodicSync, stopPeriodicSync } from './sync'
+import { createHud, toggleHud } from './hud'
+import { initHudHotkey, unregisterAllHotkeys } from './hotkey'
 
 let mainWindow: BrowserWindow | null = null
 
@@ -72,7 +74,10 @@ app.whenReady().then(async () => {
 
   registerIpcHandlers()
   createWindow()
-  createTray(mainWindow!)
+  createTray(mainWindow!, toggleHud)
+  // Pre-create HUD window hidden so the first hotkey press opens instantly.
+  createHud()
+  initHudHotkey()
 
   // Auto-updater (only in production)
   if (!is.dev) {
@@ -130,6 +135,7 @@ app.on('before-quit', () => {
   // @ts-expect-error custom property
   app.isQuitting = true
   stopPeriodicSync()
+  unregisterAllHotkeys()
   closeDb()
 })
 

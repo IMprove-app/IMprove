@@ -65,6 +65,47 @@ interface SyncMeta {
   todos_synced_once?: boolean
   achievements_synced_once?: boolean
   badge_events_synced_once?: boolean
+  snippets_synced_once?: boolean
+  snippet_folders_synced_once?: boolean
+}
+
+// Folder layer for snippet HUD — snippets must belong to exactly one folder.
+export interface SnippetFolderRow {
+  id: string
+  name: string
+  sort_order: number
+  created_at: string
+  updated_at?: string
+  deleted_at?: string
+}
+
+// Snippet Clipboard — records user-saved clipboard entries for the HUD.
+export interface SnippetRow {
+  id: string
+  folder_id?: string
+  title: string
+  content: string
+  sort_order: number
+  created_at: string
+  updated_at?: string
+  deleted_at?: string
+}
+
+// App-level settings persisted to the local store (not synced).
+// `hudHotkey` is an Electron accelerator string; empty string disables the hotkey.
+export interface AppSettings {
+  hudHotkey: string
+  hudPinned: boolean
+  hudBounds?: { x: number; y: number; width: number; height: number }
+}
+
+export const DEFAULT_HUD_HOTKEY = 'CommandOrControl+Shift+E'
+
+function defaultSettings(): AppSettings {
+  return {
+    hudHotkey: DEFAULT_HUD_HOTKEY,
+    hudPinned: false
+  }
 }
 
 export interface DeckRow {
@@ -170,6 +211,9 @@ export interface StoreData {
   achievements: AchievementRow[]
   badge_events: BadgeEventRow[]
   user_progress: UserProgress
+  snippets: SnippetRow[]
+  snippet_folders: SnippetFolderRow[]
+  settings: AppSettings
   sync_meta?: SyncMeta
 }
 
@@ -198,6 +242,9 @@ export function loadStore(): StoreData {
     achievements: [],
     badge_events: [],
     user_progress: defaultUserProgress(),
+    snippets: [],
+    snippet_folders: [],
+    settings: defaultSettings(),
     sync_meta: { last_sync_at: null, user_id: null }
   }
   if (fs.existsSync(filePath)) {
@@ -233,6 +280,43 @@ export function loadStore(): StoreData {
       if (typeof up.total_shields_used !== 'number') up.total_shields_used = 0
       // P2b: default is_shield=0 on legacy sessions only if the caller inspects it.
       // We keep optional to avoid bloating the store; sync layer uses `?? 0`.
+      // Snippet HUD: backfill snippets array + settings on legacy stores.
+      if (!store.snippets) store.snippets = []
+      if (!store.snippet_folders) store.snippet_folders = []
+      if (!store.settings) {
+        store.settings = defaultSettings()
+      } else {
+        if (typeof store.settings.hudHotkey !== 'string') {
+          store.settings.hudHotkey = DEFAULT_HUD_HOTKEY
+        }
+        if (typeof store.settings.hudPinned !== 'boolean') {
+          store.settings.hudPinned = false
+        }
+      }
+      // Folder migration: if snippets exist but have no folder_id, create a
+      // default "默认" folder and assign them all to it. Every snippet must
+      // belong to a folder going forward.
+      const orphanSnippets = store.snippets.filter(sn => !sn.deleted_at && !sn.folder_id)
+      if (orphanSnippets.length > 0) {
+        let defaultFolder = store.snippet_folders.find(
+          f => !f.deleted_at && f.name === '默认'
+        )
+        if (!defaultFolder) {
+          const now = new Date().toISOString()
+          defaultFolder = {
+            id: randomUUID(),
+            name: '默认',
+            sort_order: 0,
+            created_at: now,
+            updated_at: now
+          }
+          store.snippet_folders.push(defaultFolder)
+        }
+        for (const sn of orphanSnippets) {
+          sn.folder_id = defaultFolder.id
+          sn.updated_at = new Date().toISOString()
+        }
+      }
     } catch {
       store = empty
     }
@@ -859,6 +943,155 @@ export function wasMissedYesterday(habitId: string): boolean {
   }
 
   return totalSec < goalSec
+}
+
+// ============ Snippet Folders CRUD ============
+
+export function getAllSnippetFolders(): SnippetFolderRow[] {
+  const s = loadStore()
+  return s.snippet_folders
+    .filter(f => !f.deleted_at)
+    .sort((a, b) => {
+      if (a.sort_order !== b.sort_order) return a.sort_order - b.sort_order
+      return a.created_at < b.created_at ? -1 : 1
+    })
+}
+
+export function createSnippetFolder(folder: {
+  id: string
+  name: string
+  sort_order?: number
+}): SnippetFolderRow {
+  const s = loadStore()
+  const now = new Date().toISOString()
+  const row: SnippetFolderRow = {
+    id: folder.id,
+    name: folder.name,
+    sort_order: folder.sort_order ?? 0,
+    created_at: now,
+    updated_at: now
+  }
+  s.snippet_folders.push(row)
+  saveStore()
+  return row
+}
+
+export function updateSnippetFolder(
+  id: string,
+  updates: Partial<SnippetFolderRow>
+): SnippetFolderRow | undefined {
+  const s = loadStore()
+  const idx = s.snippet_folders.findIndex(f => f.id === id)
+  if (idx === -1) return undefined
+  s.snippet_folders[idx] = {
+    ...s.snippet_folders[idx],
+    ...updates,
+    id,
+    updated_at: new Date().toISOString()
+  }
+  saveStore()
+  return s.snippet_folders[idx]
+}
+
+// Deleting a folder cascades: the folder + every snippet inside it are
+// soft-deleted. This preserves existing sync semantics — remote `deleted_at`
+// is how we propagate deletion.
+export function deleteSnippetFolder(id: string): void {
+  const s = loadStore()
+  const now = new Date().toISOString()
+  const idx = s.snippet_folders.findIndex(f => f.id === id)
+  if (idx !== -1) {
+    s.snippet_folders[idx].deleted_at = now
+    s.snippet_folders[idx].updated_at = now
+  }
+  for (const sn of s.snippets) {
+    if (sn.folder_id === id && !sn.deleted_at) {
+      sn.deleted_at = now
+      sn.updated_at = now
+    }
+  }
+  saveStore()
+}
+
+// ============ Snippets CRUD ============
+
+export function getAllSnippets(folderId?: string): SnippetRow[] {
+  const s = loadStore()
+  return s.snippets
+    .filter(sn => !sn.deleted_at)
+    .filter(sn => (folderId === undefined ? true : sn.folder_id === folderId))
+    .sort((a, b) => {
+      if (a.sort_order !== b.sort_order) return a.sort_order - b.sort_order
+      const au = a.updated_at || a.created_at
+      const bu = b.updated_at || b.created_at
+      return au < bu ? 1 : -1
+    })
+}
+
+export function createSnippet(snippet: {
+  id: string
+  folder_id?: string
+  title: string
+  content: string
+  sort_order?: number
+}): SnippetRow {
+  const s = loadStore()
+  const now = new Date().toISOString()
+  const row: SnippetRow = {
+    id: snippet.id,
+    folder_id: snippet.folder_id,
+    title: snippet.title,
+    content: snippet.content,
+    sort_order: snippet.sort_order ?? 0,
+    created_at: now,
+    updated_at: now
+  }
+  s.snippets.push(row)
+  saveStore()
+  return row
+}
+
+export function updateSnippet(id: string, updates: Partial<SnippetRow>): SnippetRow | undefined {
+  const s = loadStore()
+  const idx = s.snippets.findIndex(sn => sn.id === id)
+  if (idx === -1) return undefined
+  s.snippets[idx] = { ...s.snippets[idx], ...updates, id, updated_at: new Date().toISOString() }
+  saveStore()
+  return s.snippets[idx]
+}
+
+export function deleteSnippet(id: string): void {
+  const s = loadStore()
+  const idx = s.snippets.findIndex(sn => sn.id === id)
+  if (idx !== -1) {
+    const now = new Date().toISOString()
+    s.snippets[idx].deleted_at = now
+    s.snippets[idx].updated_at = now
+    saveStore()
+  }
+}
+
+export function touchSnippet(id: string): void {
+  const s = loadStore()
+  const idx = s.snippets.findIndex(sn => sn.id === id)
+  if (idx !== -1) {
+    s.snippets[idx].updated_at = new Date().toISOString()
+    saveStore()
+  }
+}
+
+// ============ Settings ============
+
+export function getSettings(): AppSettings {
+  const s = loadStore()
+  return s.settings
+}
+
+export function updateSettings(patch: Partial<AppSettings>): AppSettings {
+  const s = loadStore()
+  s.settings = { ...s.settings, ...patch }
+  saveStore()
+  return s.settings
 }
 
 export function closeDb(): void {

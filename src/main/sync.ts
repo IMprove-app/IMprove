@@ -10,7 +10,9 @@ import {
   TodoRow,
   AchievementRow,
   BadgeEventRow,
-  UserProgress
+  UserProgress,
+  SnippetRow,
+  SnippetFolderRow
 } from './db'
 
 export type SyncState = 'idle' | 'syncing' | 'error' | 'offline'
@@ -339,6 +341,113 @@ export async function runSync(): Promise<void> {
       }
     }
 
+    // First-time full push for snippet folders + snippets.
+    const snippetFoldersFirstSync = !store.sync_meta.snippet_folders_synced_once
+    const snippetFoldersSince = snippetFoldersFirstSync ? null : since
+    const snippetsFirstSync = !store.sync_meta.snippets_synced_once
+    const snippetsSince = snippetsFirstSync ? null : since
+
+    // ========== Snippet Folders PUSH ==========
+    const localFolders = store.snippet_folders.filter(
+      f => !snippetFoldersSince || (f.updated_at && f.updated_at > snippetFoldersSince)
+    )
+    if (localFolders.length > 0) {
+      const rows = localFolders.map(f => ({
+        id: f.id,
+        user_id: userId,
+        name: f.name,
+        sort_order: f.sort_order,
+        created_at: f.created_at,
+        updated_at: f.updated_at || f.created_at,
+        deleted_at: f.deleted_at || null
+      }))
+      await sb.from('snippet_folders').upsert(rows, { onConflict: 'id' })
+    }
+
+    // ========== Snippet Folders PULL ==========
+    let foldersQuery = sb.from('snippet_folders').select('*').eq('user_id', userId)
+    if (since) {
+      foldersQuery = foldersQuery.gt('updated_at', since)
+    }
+    const { data: remoteFolders } = await foldersQuery
+
+    if (remoteFolders && remoteFolders.length > 0) {
+      for (const remote of remoteFolders) {
+        const localIdx = store.snippet_folders.findIndex(f => f.id === remote.id)
+        const remoteRow: SnippetFolderRow = {
+          id: remote.id,
+          name: remote.name || '',
+          sort_order: remote.sort_order ?? 0,
+          created_at: remote.created_at,
+          updated_at: remote.updated_at,
+          deleted_at: remote.deleted_at || undefined
+        }
+        if (localIdx === -1) {
+          store.snippet_folders.push(remoteRow)
+        } else {
+          const local = store.snippet_folders[localIdx]
+          const localTime = local.updated_at || local.created_at
+          const remoteTime = remote.updated_at || remote.created_at
+          if (remoteTime > localTime) {
+            store.snippet_folders[localIdx] = remoteRow
+          }
+        }
+      }
+    }
+
+    // ========== Snippets PUSH ==========
+    const localSnippets = store.snippets.filter(
+      sn => !snippetsSince || (sn.updated_at && sn.updated_at > snippetsSince)
+    )
+    if (localSnippets.length > 0) {
+      const rows = localSnippets.map(sn => ({
+        id: sn.id,
+        user_id: userId,
+        folder_id: sn.folder_id || null,
+        title: sn.title,
+        content: sn.content,
+        sort_order: sn.sort_order,
+        created_at: sn.created_at,
+        updated_at: sn.updated_at || sn.created_at,
+        deleted_at: sn.deleted_at || null
+      }))
+      await sb.from('snippets').upsert(rows, { onConflict: 'id' })
+    }
+
+    // ========== Snippets PULL ==========
+    let snippetsQuery = sb.from('snippets').select('*').eq('user_id', userId)
+    if (since) {
+      snippetsQuery = snippetsQuery.gt('updated_at', since)
+    }
+    const { data: remoteSnippets } = await snippetsQuery
+
+    if (remoteSnippets && remoteSnippets.length > 0) {
+      for (const remote of remoteSnippets) {
+        const localIdx = store.snippets.findIndex(sn => sn.id === remote.id)
+        const remoteRow: SnippetRow = {
+          id: remote.id,
+          folder_id: remote.folder_id || undefined,
+          title: remote.title || '',
+          content: remote.content || '',
+          sort_order: remote.sort_order ?? 0,
+          created_at: remote.created_at,
+          updated_at: remote.updated_at,
+          deleted_at: remote.deleted_at || undefined
+        }
+
+        if (localIdx === -1) {
+          store.snippets.push(remoteRow)
+        } else {
+          const local = store.snippets[localIdx]
+          const localTime = local.updated_at || local.created_at
+          const remoteTime = remote.updated_at || remote.created_at
+          if (remoteTime > localTime) {
+            store.snippets[localIdx] = remoteRow
+          }
+        }
+      }
+    }
+
     // First-time full push for achievements / badge_events (added in P1).
     const achievementsFirstSync = !store.sync_meta.achievements_synced_once
     const achievementsSince = achievementsFirstSync ? null : since
@@ -519,6 +628,8 @@ export async function runSync(): Promise<void> {
     store.sync_meta.todos_synced_once = true
     store.sync_meta.achievements_synced_once = true
     store.sync_meta.badge_events_synced_once = true
+    store.sync_meta.snippets_synced_once = true
+    store.sync_meta.snippet_folders_synced_once = true
     lastSyncAt = store.sync_meta.last_sync_at
     saveStore()
 
