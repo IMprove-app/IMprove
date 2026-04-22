@@ -1,6 +1,6 @@
 {
   "name": "improve",
-  "version": "1.1.4",
+  "version": "1.1.5",
   "description": "Daily habit check-in tracker with futuristic UI",
   "main": "./out/main/index.js",
   "scripts": {
