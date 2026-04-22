@@ -1,48 +1,79 @@
 import { globalShortcut } from 'electron'
-import { getSettings, updateSettings, DEFAULT_HUD_HOTKEY } from './db'
+import {
+  getSettings,
+  updateSettings,
+  DEFAULT_HUD_HOTKEY,
+  DEFAULT_SCRATCH_HOTKEY,
+  AppSettings
+} from './db'
 import { toggleHud } from './hud'
+import { toggleScratch } from './scratch'
 
-let currentAccel: string = ''
+export type HotkeySlot = 'hud' | 'scratch'
+
+interface SlotConfig {
+  action: () => void
+  settingsKey: keyof AppSettings
+}
+
+const slotConfigs: Record<HotkeySlot, SlotConfig> = {
+  hud: { action: () => toggleHud(), settingsKey: 'hudHotkey' },
+  scratch: { action: () => toggleScratch(), settingsKey: 'scratchHotkey' }
+}
+
+const registered: Record<HotkeySlot, string> = {
+  hud: '',
+  scratch: ''
+}
 
 function safeUnregister(accel: string): void {
   if (!accel) return
   try {
     globalShortcut.unregister(accel)
   } catch {
-    // ignore — unknown accelerator strings from bad input shouldn't crash
+    // ignore — malformed accelerator strings shouldn't crash
   }
 }
 
-export function registerHudHotkey(accel: string): { ok: boolean; error?: string } {
+function otherSlot(slot: HotkeySlot): HotkeySlot {
+  return slot === 'hud' ? 'scratch' : 'hud'
+}
+
+function registerSlot(slot: HotkeySlot, accel: string): { ok: boolean; error?: string } {
   const next = (accel ?? '').trim()
+  const cfg = slotConfigs[slot]
 
-  // Allow clearing the hotkey by passing empty string.
+  // Clear hotkey by empty string.
   if (!next) {
-    safeUnregister(currentAccel)
-    currentAccel = ''
+    safeUnregister(registered[slot])
+    registered[slot] = ''
     return { ok: true }
   }
 
-  // If the requested accelerator is already bound to us, no-op.
-  if (next === currentAccel && globalShortcut.isRegistered(next)) {
+  // Reject cross-slot collision before touching anything.
+  const other = otherSlot(slot)
+  if (next === registered[other] && registered[other] !== '') {
+    return { ok: false, error: '与另一个快捷键冲突' }
+  }
+
+  // No-op if already bound to this slot.
+  if (next === registered[slot] && globalShortcut.isRegistered(next)) {
     return { ok: true }
   }
 
-  // Unregister old first so we can fall back if the new one fails.
-  const previous = currentAccel
+  const previous = registered[slot]
   safeUnregister(previous)
 
   let ok = false
   try {
-    ok = globalShortcut.register(next, () => toggleHud())
+    ok = globalShortcut.register(next, cfg.action)
   } catch (e) {
-    // On Windows, malformed accelerators throw — treat as conflict.
     if (previous) {
       try {
-        globalShortcut.register(previous, () => toggleHud())
-        currentAccel = previous
+        globalShortcut.register(previous, cfg.action)
+        registered[slot] = previous
       } catch {
-        currentAccel = ''
+        registered[slot] = ''
       }
     }
     return { ok: false, error: `无效的快捷键：${String(e)}` }
@@ -51,43 +82,74 @@ export function registerHudHotkey(accel: string): { ok: boolean; error?: string 
   if (!ok) {
     if (previous) {
       try {
-        if (globalShortcut.register(previous, () => toggleHud())) {
-          currentAccel = previous
+        if (globalShortcut.register(previous, cfg.action)) {
+          registered[slot] = previous
         } else {
-          currentAccel = ''
+          registered[slot] = ''
         }
       } catch {
-        currentAccel = ''
+        registered[slot] = ''
       }
     } else {
-      currentAccel = ''
+      registered[slot] = ''
     }
     return { ok: false, error: '该快捷键已被其它程序占用' }
   }
 
-  currentAccel = next
+  registered[slot] = next
   return { ok: true }
 }
 
-export function setHudHotkey(accel: string): { ok: boolean; error?: string } {
-  const outcome = registerHudHotkey(accel)
+function persistSlot(slot: HotkeySlot, accel: string): void {
+  updateSettings({ [slotConfigs[slot].settingsKey]: accel } as Partial<AppSettings>)
+}
+
+// ===== Public API =====
+
+export function setSlotHotkey(
+  slot: HotkeySlot,
+  accel: string
+): { ok: boolean; error?: string } {
+  const outcome = registerSlot(slot, accel)
   if (outcome.ok) {
-    updateSettings({ hudHotkey: accel })
+    persistSlot(slot, accel)
   }
   return outcome
 }
 
-export function initHudHotkey(): void {
-  const settings = getSettings()
-  const accel = settings.hudHotkey || DEFAULT_HUD_HOTKEY
-  registerHudHotkey(accel)
+export function getRegisteredSlot(slot: HotkeySlot): string {
+  return registered[slot]
 }
 
-export function getRegisteredHotkey(): string {
-  return currentAccel
+export function initHotkeys(): void {
+  const settings = getSettings()
+  const hud = settings.hudHotkey || DEFAULT_HUD_HOTKEY
+  const scratch = settings.scratchHotkey || DEFAULT_SCRATCH_HOTKEY
+  registerSlot('hud', hud)
+  registerSlot('scratch', scratch)
 }
 
 export function unregisterAllHotkeys(): void {
   globalShortcut.unregisterAll()
-  currentAccel = ''
+  registered.hud = ''
+  registered.scratch = ''
+}
+
+// ===== Legacy single-slot wrappers (kept so existing callers keep compiling) =====
+
+export function registerHudHotkey(accel: string): { ok: boolean; error?: string } {
+  return registerSlot('hud', accel)
+}
+
+export function setHudHotkey(accel: string): { ok: boolean; error?: string } {
+  return setSlotHotkey('hud', accel)
+}
+
+export function initHudHotkey(): void {
+  const settings = getSettings()
+  registerSlot('hud', settings.hudHotkey || DEFAULT_HUD_HOTKEY)
+}
+
+export function getRegisteredHotkey(): string {
+  return registered.hud
 }

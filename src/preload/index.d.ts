@@ -226,6 +226,17 @@ interface API {
   setHudHotkey(accel: string): Promise<{ ok: boolean; error?: string; active?: string }>
   onHotkeyConflict(callback: (payload: { accel: string; error?: string }) => void): () => void
 
+  // Scratch Pad window
+  toggleScratch(): Promise<void>
+  hideScratch(): Promise<void>
+  getScratchPinned(): Promise<boolean>
+  setScratchPinned(pinned: boolean): Promise<{ ok: boolean }>
+  onScratchPinnedChanged(callback: (pinned: boolean) => void): () => void
+  getScratchDraft(): Promise<string>
+  setScratchDraft(draft: string): Promise<{ ok: boolean }>
+  getScratchHotkey(): Promise<string>
+  setScratchHotkey(accel: string): Promise<{ ok: boolean; error?: string; active?: string }>
+
   // Progress & Achievements
   getProgress(): Promise<UserProgressData>
   listAchievements(): Promise<AchievementData[]>

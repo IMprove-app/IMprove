@@ -33,6 +33,30 @@ export function getSyncStatus(): { state: SyncState; lastSync: string | null } {
   return { state: syncState, lastSync: lastSyncAt }
 }
 
+interface WatermarkStore {
+  sync_meta?: { pull_watermarks?: Record<string, string> }
+}
+
+function getPullWatermark(store: WatermarkStore, table: string): string | null {
+  return store.sync_meta?.pull_watermarks?.[table] ?? null
+}
+
+function advancePullWatermark(
+  store: WatermarkStore,
+  table: string,
+  rows: ReadonlyArray<{ updated_at?: string | null }> | null | undefined
+): void {
+  if (!rows || rows.length === 0) return
+  if (!store.sync_meta) return
+  if (!store.sync_meta.pull_watermarks) store.sync_meta.pull_watermarks = {}
+  let max = store.sync_meta.pull_watermarks[table] || ''
+  for (const r of rows) {
+    const t = r.updated_at || ''
+    if (t > max) max = t
+  }
+  if (max) store.sync_meta.pull_watermarks[table] = max
+}
+
 export async function runSync(): Promise<void> {
   const auth = await getAuthStatus()
   if (!auth.loggedIn || !auth.userId) return
@@ -98,11 +122,13 @@ export async function runSync(): Promise<void> {
     // ========== PULL phase ==========
 
     // Pull remote habits
+    const habitsWatermark = getPullWatermark(store, 'habits')
     let habitsQuery = sb.from('habits').select('*').eq('user_id', userId)
-    if (since) {
-      habitsQuery = habitsQuery.gt('updated_at', since)
+    if (habitsWatermark) {
+      habitsQuery = habitsQuery.gt('updated_at', habitsWatermark)
     }
     const { data: remoteHabits } = await habitsQuery
+    advancePullWatermark(store, 'habits', remoteHabits)
 
     if (remoteHabits && remoteHabits.length > 0) {
       for (const remote of remoteHabits) {
@@ -138,11 +164,13 @@ export async function runSync(): Promise<void> {
     }
 
     // Pull remote sessions
+    const sessionsWatermark = getPullWatermark(store, 'sessions')
     let sessionsQuery = sb.from('sessions').select('*').eq('user_id', userId)
-    if (since) {
-      sessionsQuery = sessionsQuery.gt('updated_at', since)
+    if (sessionsWatermark) {
+      sessionsQuery = sessionsQuery.gt('updated_at', sessionsWatermark)
     }
     const { data: remoteSessions } = await sessionsQuery
+    advancePullWatermark(store, 'sessions', remoteSessions)
 
     if (remoteSessions && remoteSessions.length > 0) {
       for (const remote of remoteSessions) {
@@ -214,11 +242,13 @@ export async function runSync(): Promise<void> {
     }
 
     // ========== Decks PULL ==========
+    const decksWatermark = getPullWatermark(store, 'decks')
     let decksQuery = sb.from('decks').select('*').eq('user_id', userId)
-    if (since) {
-      decksQuery = decksQuery.gt('updated_at', since)
+    if (decksWatermark) {
+      decksQuery = decksQuery.gt('updated_at', decksWatermark)
     }
     const { data: remoteDecks } = await decksQuery
+    advancePullWatermark(store, 'decks', remoteDecks)
 
     if (remoteDecks && remoteDecks.length > 0) {
       for (const remote of remoteDecks) {
@@ -245,11 +275,13 @@ export async function runSync(): Promise<void> {
     }
 
     // ========== Cards PULL ==========
+    const cardsWatermark = getPullWatermark(store, 'cards')
     let cardsQuery = sb.from('cards').select('*').eq('user_id', userId)
-    if (since) {
-      cardsQuery = cardsQuery.gt('updated_at', since)
+    if (cardsWatermark) {
+      cardsQuery = cardsQuery.gt('updated_at', cardsWatermark)
     }
     const { data: remoteCards } = await cardsQuery
+    advancePullWatermark(store, 'cards', remoteCards)
 
     if (remoteCards && remoteCards.length > 0) {
       for (const remote of remoteCards) {
@@ -306,11 +338,13 @@ export async function runSync(): Promise<void> {
     }
 
     // ========== Todos PULL ==========
+    const todosWatermark = getPullWatermark(store, 'todos')
     let todosQuery = sb.from('todos').select('*').eq('user_id', userId)
-    if (since) {
-      todosQuery = todosQuery.gt('updated_at', since)
+    if (todosWatermark) {
+      todosQuery = todosQuery.gt('updated_at', todosWatermark)
     }
     const { data: remoteTodos } = await todosQuery
+    advancePullWatermark(store, 'todos', remoteTodos)
 
     if (remoteTodos && remoteTodos.length > 0) {
       for (const remote of remoteTodos) {
@@ -365,11 +399,13 @@ export async function runSync(): Promise<void> {
     }
 
     // ========== Snippet Folders PULL ==========
+    const foldersWatermark = getPullWatermark(store, 'snippet_folders')
     let foldersQuery = sb.from('snippet_folders').select('*').eq('user_id', userId)
-    if (since) {
-      foldersQuery = foldersQuery.gt('updated_at', since)
+    if (foldersWatermark) {
+      foldersQuery = foldersQuery.gt('updated_at', foldersWatermark)
     }
     const { data: remoteFolders } = await foldersQuery
+    advancePullWatermark(store, 'snippet_folders', remoteFolders)
 
     if (remoteFolders && remoteFolders.length > 0) {
       for (const remote of remoteFolders) {
@@ -415,11 +451,13 @@ export async function runSync(): Promise<void> {
     }
 
     // ========== Snippets PULL ==========
+    const snippetsWatermark = getPullWatermark(store, 'snippets')
     let snippetsQuery = sb.from('snippets').select('*').eq('user_id', userId)
-    if (since) {
-      snippetsQuery = snippetsQuery.gt('updated_at', since)
+    if (snippetsWatermark) {
+      snippetsQuery = snippetsQuery.gt('updated_at', snippetsWatermark)
     }
     const { data: remoteSnippets } = await snippetsQuery
+    advancePullWatermark(store, 'snippets', remoteSnippets)
 
     if (remoteSnippets && remoteSnippets.length > 0) {
       for (const remote of remoteSnippets) {
@@ -474,11 +512,13 @@ export async function runSync(): Promise<void> {
     }
 
     // ========== Achievements PULL ==========
+    const achievementsWatermark = getPullWatermark(store, 'achievements')
     let achievementsQuery = sb.from('achievements').select('*').eq('user_id', userId)
-    if (since) {
-      achievementsQuery = achievementsQuery.gt('updated_at', since)
+    if (achievementsWatermark) {
+      achievementsQuery = achievementsQuery.gt('updated_at', achievementsWatermark)
     }
     const { data: remoteAchievements } = await achievementsQuery
+    advancePullWatermark(store, 'achievements', remoteAchievements)
 
     if (remoteAchievements && remoteAchievements.length > 0) {
       for (const remote of remoteAchievements) {
@@ -532,11 +572,13 @@ export async function runSync(): Promise<void> {
     }
 
     // ========== Badge Events PULL ==========
+    const badgeEventsWatermark = getPullWatermark(store, 'badge_events')
     let badgeEventsQuery = sb.from('badge_events').select('*').eq('user_id', userId)
-    if (since) {
-      badgeEventsQuery = badgeEventsQuery.gt('updated_at', since)
+    if (badgeEventsWatermark) {
+      badgeEventsQuery = badgeEventsQuery.gt('updated_at', badgeEventsWatermark)
     }
     const { data: remoteBadgeEvents } = await badgeEventsQuery
+    advancePullWatermark(store, 'badge_events', remoteBadgeEvents)
 
     if (remoteBadgeEvents && remoteBadgeEvents.length > 0) {
       for (const remote of remoteBadgeEvents) {

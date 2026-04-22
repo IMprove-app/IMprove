@@ -36,7 +36,11 @@ function createTrayIcon(): Electron.NativeImage {
   return nativeImage.createFromBuffer(buf, { width: size, height: size })
 }
 
-export function createTray(mainWindow: BrowserWindow, onToggleHud?: () => void): Tray {
+export function createTray(
+  mainWindow: BrowserWindow,
+  onToggleHud?: () => void,
+  onToggleScratch?: () => void
+): Tray {
   const icon = createTrayIcon()
   tray = new Tray(icon)
   tray.setToolTip('IMprove - 每日打卡')
@@ -55,6 +59,13 @@ export function createTray(mainWindow: BrowserWindow, onToggleHud?: () => void):
     items.push({
       label: '快速粘贴 HUD',
       click: () => onToggleHud()
+    })
+  }
+
+  if (onToggleScratch) {
+    items.push({
+      label: '草稿纸',
+      click: () => onToggleScratch()
     })
   }
 

@@ -2,12 +2,14 @@ import React from 'react'
 import ReactDOM from 'react-dom/client'
 import App from './App'
 import Hud from './pages/Hud'
+import Scratch from './pages/Scratch'
 import './assets/index.css'
 
-const isHudRoute = window.location.hash === '#/hud'
+const hash = window.location.hash
+const page = hash === '#/hud' ? <Hud /> : hash === '#/scratch' ? <Scratch /> : <App />
 
 ReactDOM.createRoot(document.getElementById('root')!).render(
   <React.StrictMode>
-    {isHudRoute ? <Hud /> : <App />}
+    {page}
   </React.StrictMode>
 )

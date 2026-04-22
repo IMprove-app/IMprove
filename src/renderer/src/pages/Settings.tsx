@@ -4,6 +4,7 @@ import { getReduceMotionPref, setReduceMotion } from '../lib/motionPrefs'
 import HotkeyCapture from '../components/HotkeyCapture'
 
 const DEFAULT_HUD_HOTKEY = 'CommandOrControl+Shift+E'
+const DEFAULT_SCRATCH_HOTKEY = 'CommandOrControl+Shift+Q'
 
 interface SnippetData {
   id: string
@@ -50,6 +51,9 @@ function Settings({ onBack, loggedIn, onLogout, onLogin }: Props): JSX.Element {
   // Snippet HUD state
   const [hudHotkey, setHudHotkey] = useState<string>('')
   const [hudPinned, setHudPinned] = useState(false)
+  // Scratch Pad state
+  const [scratchHotkey, setScratchHotkey] = useState<string>('')
+  const [scratchPinned, setScratchPinned] = useState(false)
   const [snippets, setSnippets] = useState<SnippetData[]>([])
   const [folders, setFolders] = useState<SnippetFolderData[]>([])
   const [editingId, setEditingId] = useState<string | null>(null)
@@ -86,10 +90,14 @@ function Settings({ onBack, loggedIn, onLogout, onLogin }: Props): JSX.Element {
     const off = window.api.onSnippetsChanged(loadSnippets)
     const offFolders = window.api.onSnippetFoldersChanged(loadFolders)
     const offPin = window.api.onHudPinnedChanged(setHudPinned)
+    window.api.getScratchHotkey().then(setScratchHotkey).catch(() => {})
+    window.api.getScratchPinned().then(setScratchPinned).catch(() => {})
+    const offScratchPin = window.api.onScratchPinnedChanged(setScratchPinned)
     return () => {
       off()
       offFolders()
       offPin()
+      offScratchPin()
     }
   }, [])
 
@@ -158,6 +166,22 @@ function Settings({ onBack, loggedIn, onLogout, onLogin }: Props): JSX.Element {
 
   const handleOpenHud = async (): Promise<void> => {
     await window.api.toggleHud()
+  }
+
+  const handleOpenScratch = async (): Promise<void> => {
+    await window.api.toggleScratch()
+  }
+
+  const handleSetScratchHotkey = async (accel: string): Promise<{ ok: boolean; error?: string; active?: string }> => {
+    const result = await window.api.setScratchHotkey(accel)
+    if (result.ok) setScratchHotkey(accel)
+    return result
+  }
+
+  const handleToggleScratchPinned = async (): Promise<void> => {
+    const next = !scratchPinned
+    setScratchPinned(next)
+    await window.api.setScratchPinned(next)
   }
 
   const updateReduceMotion = (value: boolean | null): void => {
@@ -551,6 +575,53 @@ function Settings({ onBack, loggedIn, onLogout, onLogin }: Props): JSX.Element {
               })()}
             </div>
           )}
+        </div>
+      </div>
+
+      {/* Scratch Pad (草稿纸) */}
+      <div className="glass-card p-4 mb-4">
+        <div className="flex items-center justify-between mb-3">
+          <h3 className="text-sm font-semibold text-txt-secondary">草稿纸 · 临时粘贴</h3>
+          <motion.button
+            onClick={handleOpenScratch}
+            className="text-[10px] px-2 py-1 rounded-md bg-accent-violet/10 text-accent-violet border border-accent-violet/20 hover:bg-accent-violet/20 transition-colors"
+            whileTap={{ scale: 0.95 }}
+          >
+            打开草稿纸
+          </motion.button>
+        </div>
+
+        <p className="text-[10px] text-txt-muted mb-3 leading-relaxed">
+          快捷键唤出浮动草稿纸，可临时粘贴，再选择保存到速贴或卡片。保存到卡片时用 <span className="font-mono text-txt-secondary">---</span> 单独一行分隔正反面，可一次创建多张。
+        </p>
+
+        {/* Hotkey */}
+        <div className="mb-3">
+          <p className="text-[11px] text-txt-primary font-medium mb-1.5">唤醒快捷键</p>
+          <HotkeyCapture
+            value={scratchHotkey}
+            onChange={handleSetScratchHotkey}
+            defaultAccel={DEFAULT_SCRATCH_HOTKEY}
+          />
+        </div>
+
+        {/* Pin default */}
+        <div className="flex items-center justify-between">
+          <div>
+            <p className="text-[11px] text-txt-primary font-medium">默认置顶在最前方</p>
+            <p className="text-[10px] text-txt-muted mt-0.5">保存后不自动收起，适合连续整理内容</p>
+          </div>
+          <button
+            onClick={handleToggleScratchPinned}
+            className={`relative w-10 h-5 rounded-full transition-colors ${
+              scratchPinned ? 'bg-accent-violet' : 'bg-bg-border'
+            }`}
+          >
+            <span
+              className="absolute top-0.5 w-4 h-4 bg-white rounded-full shadow transition-transform"
+              style={{ transform: scratchPinned ? 'translateX(22px)' : 'translateX(2px)' }}
+            />
+          </button>
         </div>
       </div>
 

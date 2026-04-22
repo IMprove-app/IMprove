@@ -63,7 +63,8 @@ import { signUp, signIn, signOut, getAuthStatus } from './supabase'
 import { runSync, getSyncStatus } from './sync'
 import { getMainWindow } from './index'
 import { toggleHud, hideHud, setHudPinned } from './hud'
-import { setHudHotkey, getRegisteredHotkey } from './hotkey'
+import { toggleScratch, hideScratch, setScratchPinned } from './scratch'
+import { setSlotHotkey, getRegisteredSlot } from './hotkey'
 
 function broadcastSnippetsChanged(): void {
   for (const win of BrowserWindow.getAllWindows()) {
@@ -565,12 +566,55 @@ export function registerIpcHandlers(): void {
   })
 
   ipcMain.handle('settings:set-hotkey', (_e, accel: string) => {
-    const outcome = setHudHotkey(accel)
+    const outcome = setSlotHotkey('hud', accel)
     if (!outcome.ok) {
       const win = getMainWindow()
       win?.webContents.send('hotkey:conflict', { accel, error: outcome.error })
     }
-    return { ...outcome, active: getRegisteredHotkey() }
+    return { ...outcome, active: getRegisteredSlot('hud') }
+  })
+
+  // ====== Scratch Window ======
+  ipcMain.handle('scratch:toggle', () => {
+    toggleScratch()
+  })
+
+  ipcMain.handle('scratch:hide', () => {
+    hideScratch()
+  })
+
+  ipcMain.handle('scratch:get-pinned', () => {
+    return getSettings().scratchPinned === true
+  })
+
+  ipcMain.handle('scratch:set-pinned', (_e, pinned: boolean) => {
+    setScratchPinned(!!pinned)
+    for (const win of BrowserWindow.getAllWindows()) {
+      if (!win.isDestroyed()) win.webContents.send('scratch:pinned-changed', !!pinned)
+    }
+    return { ok: true }
+  })
+
+  ipcMain.handle('scratch:get-draft', () => {
+    return getSettings().scratchDraft ?? ''
+  })
+
+  ipcMain.handle('scratch:set-draft', (_e, draft: string) => {
+    updateSettings({ scratchDraft: typeof draft === 'string' ? draft : '' })
+    return { ok: true }
+  })
+
+  ipcMain.handle('settings:get-scratch-hotkey', () => {
+    return getSettings().scratchHotkey ?? ''
+  })
+
+  ipcMain.handle('settings:set-scratch-hotkey', (_e, accel: string) => {
+    const outcome = setSlotHotkey('scratch', accel)
+    if (!outcome.ok) {
+      const win = getMainWindow()
+      win?.webContents.send('hotkey:conflict', { accel, error: outcome.error })
+    }
+    return { ...outcome, active: getRegisteredSlot('scratch') }
   })
 
   // ====== Window Controls ======

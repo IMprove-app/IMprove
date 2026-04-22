@@ -8,7 +8,8 @@ import { createTray } from './tray'
 import { initSupabase, getAuthStatus } from './supabase'
 import { runSync, startPeriodicSync, stopPeriodicSync } from './sync'
 import { createHud, toggleHud } from './hud'
-import { initHudHotkey, unregisterAllHotkeys } from './hotkey'
+import { createScratch, toggleScratch } from './scratch'
+import { initHotkeys, unregisterAllHotkeys } from './hotkey'
 
 let mainWindow: BrowserWindow | null = null
 
@@ -74,10 +75,11 @@ app.whenReady().then(async () => {
 
   registerIpcHandlers()
   createWindow()
-  createTray(mainWindow!, toggleHud)
-  // Pre-create HUD window hidden so the first hotkey press opens instantly.
+  createTray(mainWindow!, toggleHud, toggleScratch)
+  // Pre-create HUD + Scratch windows hidden so first hotkey press opens instantly.
   createHud()
-  initHudHotkey()
+  createScratch()
+  initHotkeys()
 
   // Auto-updater (only in production)
   if (!is.dev) {

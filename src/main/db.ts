@@ -67,6 +67,12 @@ interface SyncMeta {
   badge_events_synced_once?: boolean
   snippets_synced_once?: boolean
   snippet_folders_synced_once?: boolean
+  /**
+   * Per-table max `updated_at` observed from the server on PULL.
+   * Advances only from server row timestamps, so it's robust against cross-device
+   * clock skew and out-of-order device usage (unlike last_sync_at on the client).
+   */
+  pull_watermarks?: Record<string, string>
 }
 
 // Folder layer for snippet HUD — snippets must belong to exactly one folder.
@@ -92,19 +98,27 @@ export interface SnippetRow {
 }
 
 // App-level settings persisted to the local store (not synced).
-// `hudHotkey` is an Electron accelerator string; empty string disables the hotkey.
+// `hudHotkey` / `scratchHotkey` are Electron accelerator strings; empty string disables.
 export interface AppSettings {
   hudHotkey: string
   hudPinned: boolean
   hudBounds?: { x: number; y: number; width: number; height: number }
+  scratchHotkey: string
+  scratchPinned: boolean
+  scratchBounds?: { x: number; y: number; width: number; height: number }
+  scratchDraft?: string
 }
 
 export const DEFAULT_HUD_HOTKEY = 'CommandOrControl+Shift+E'
+export const DEFAULT_SCRATCH_HOTKEY = 'CommandOrControl+Shift+Q'
 
 function defaultSettings(): AppSettings {
   return {
     hudHotkey: DEFAULT_HUD_HOTKEY,
-    hudPinned: false
+    hudPinned: false,
+    scratchHotkey: DEFAULT_SCRATCH_HOTKEY,
+    scratchPinned: false,
+    scratchDraft: ''
   }
 }
 
@@ -291,6 +305,15 @@ export function loadStore(): StoreData {
         }
         if (typeof store.settings.hudPinned !== 'boolean') {
           store.settings.hudPinned = false
+        }
+        if (typeof store.settings.scratchHotkey !== 'string') {
+          store.settings.scratchHotkey = DEFAULT_SCRATCH_HOTKEY
+        }
+        if (typeof store.settings.scratchPinned !== 'boolean') {
+          store.settings.scratchPinned = false
+        }
+        if (typeof store.settings.scratchDraft !== 'string') {
+          store.settings.scratchDraft = ''
         }
       }
       // Folder migration: if snippets exist but have no folder_id, create a

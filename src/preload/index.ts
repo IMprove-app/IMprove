@@ -113,6 +113,21 @@ const api = {
     return () => { ipcRenderer.removeListener('hotkey:conflict', handler) }
   },
 
+  // Scratch Pad window
+  toggleScratch: () => ipcRenderer.invoke('scratch:toggle'),
+  hideScratch: () => ipcRenderer.invoke('scratch:hide'),
+  getScratchPinned: () => ipcRenderer.invoke('scratch:get-pinned'),
+  setScratchPinned: (pinned: boolean) => ipcRenderer.invoke('scratch:set-pinned', pinned),
+  onScratchPinnedChanged: (callback: (pinned: boolean) => void) => {
+    const handler = (_e: unknown, pinned: boolean): void => callback(pinned)
+    ipcRenderer.on('scratch:pinned-changed', handler)
+    return () => { ipcRenderer.removeListener('scratch:pinned-changed', handler) }
+  },
+  getScratchDraft: () => ipcRenderer.invoke('scratch:get-draft'),
+  setScratchDraft: (draft: string) => ipcRenderer.invoke('scratch:set-draft', draft),
+  getScratchHotkey: () => ipcRenderer.invoke('settings:get-scratch-hotkey'),
+  setScratchHotkey: (accel: string) => ipcRenderer.invoke('settings:set-scratch-hotkey', accel),
+
   // Progress & Achievements
   getProgress: () => ipcRenderer.invoke('progress:get'),
   listAchievements: () => ipcRenderer.invoke('achievements:list'),
