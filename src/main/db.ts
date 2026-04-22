@@ -73,6 +73,12 @@ interface SyncMeta {
    * clock skew and out-of-order device usage (unlike last_sync_at on the client).
    */
   pull_watermarks?: Record<string, string>
+  /**
+   * Per-table max `updated_at` of rows we have *successfully* pushed.
+   * Advances only after a non-error upsert, so a silent push failure leaves
+   * rows eligible to retry on the next sync. Kills the "stuck synced_once" bug class.
+   */
+  push_watermarks?: Record<string, string>
 }
 
 // Folder layer for snippet HUD — snippets must belong to exactly one folder.

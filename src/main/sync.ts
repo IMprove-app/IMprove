@@ -34,7 +34,10 @@ export function getSyncStatus(): { state: SyncState; lastSync: string | null } {
 }
 
 interface WatermarkStore {
-  sync_meta?: { pull_watermarks?: Record<string, string> }
+  sync_meta?: {
+    pull_watermarks?: Record<string, string>
+    push_watermarks?: Record<string, string>
+  }
 }
 
 function getPullWatermark(store: WatermarkStore, table: string): string | null {
@@ -57,6 +60,31 @@ function advancePullWatermark(
   if (max) store.sync_meta.pull_watermarks[table] = max
 }
 
+function getPushWatermark(store: WatermarkStore, table: string): string | null {
+  return store.sync_meta?.push_watermarks?.[table] ?? null
+}
+
+/**
+ * Advance the push watermark to the max `updated_at` of the rows we just pushed.
+ * Call ONLY after confirming the upsert succeeded (no error returned).
+ * A silent failure path that skips this call is what makes retry automatic.
+ */
+function advancePushWatermark(
+  store: WatermarkStore,
+  table: string,
+  rows: ReadonlyArray<{ updated_at?: string | null }>
+): void {
+  if (!rows || rows.length === 0) return
+  if (!store.sync_meta) return
+  if (!store.sync_meta.push_watermarks) store.sync_meta.push_watermarks = {}
+  let max = store.sync_meta.push_watermarks[table] || ''
+  for (const r of rows) {
+    const t = r.updated_at || ''
+    if (t > max) max = t
+  }
+  if (max) store.sync_meta.push_watermarks[table] = max
+}
+
 export async function runSync(): Promise<void> {
   const auth = await getAuthStatus()
   if (!auth.loggedIn || !auth.userId) return
@@ -74,14 +102,15 @@ export async function runSync(): Promise<void> {
     }
     store.sync_meta.user_id = userId
 
-    const since = store.sync_meta.last_sync_at
-
-    // ========== PUSH phase ==========
+    // ========== PUSH phase (filtered by per-table push_watermarks) ==========
 
     // Push habits
-    const localHabits = store.habits.filter(h => !since || (h.updated_at && h.updated_at > since))
+    const habitsPushWatermark = getPushWatermark(store, 'habits')
+    const localHabits = store.habits.filter(
+      h => !habitsPushWatermark || (h.updated_at && h.updated_at > habitsPushWatermark)
+    )
     if (localHabits.length > 0) {
-      const rows = localHabits.map(h => ({
+      const habitRows = localHabits.map(h => ({
         id: h.id,
         user_id: userId,
         name: h.name,
@@ -96,15 +125,20 @@ export async function runSync(): Promise<void> {
         updated_at: h.updated_at || h.created_at,
         deleted_at: h.deleted_at || null
       }))
-      await sb.from('habits').upsert(rows, { onConflict: 'id' })
+      const { error: habitsErr } = await sb.from('habits').upsert(habitRows, { onConflict: 'id' })
+      if (habitsErr) console.error('sync push failed: habits', habitsErr)
+      else advancePushWatermark(store, 'habits', habitRows)
     }
 
     // Push completed sessions (not active ones)
+    const sessionsPushWatermark = getPushWatermark(store, 'sessions')
     const localSessions = store.sessions.filter(
-      s => s.ended_at !== null && (!since || (s.updated_at && s.updated_at > since))
+      s =>
+        s.ended_at !== null &&
+        (!sessionsPushWatermark || (s.updated_at && s.updated_at > sessionsPushWatermark))
     )
     if (localSessions.length > 0) {
-      const rows = localSessions.map(s => ({
+      const sessionRows = localSessions.map(s => ({
         id: s.id,
         user_id: userId,
         habit_id: s.habit_id,
@@ -116,7 +150,9 @@ export async function runSync(): Promise<void> {
         is_shield: s.is_shield ?? 0,
         updated_at: s.updated_at || s.started_at
       }))
-      await sb.from('sessions').upsert(rows, { onConflict: 'id' })
+      const { error: sessionsErr } = await sb.from('sessions').upsert(sessionRows, { onConflict: 'id' })
+      if (sessionsErr) console.error('sync push failed: sessions', sessionsErr)
+      else advancePushWatermark(store, 'sessions', sessionRows)
     }
 
     // ========== PULL phase ==========
@@ -200,17 +236,13 @@ export async function runSync(): Promise<void> {
       }
     }
 
-    // First-time full push for decks/cards (added after initial release).
-    // Bypass `since` filter so pre-existing local data gets uploaded once.
-    const cardsFirstSync = !store.sync_meta.cards_synced_once
-    const cardsSince = cardsFirstSync ? null : since
-
     // ========== Decks PUSH ==========
+    const decksPushWatermark = getPushWatermark(store, 'decks')
     const localDecks = store.decks.filter(
-      d => !cardsSince || (d.updated_at && d.updated_at > cardsSince)
+      d => !decksPushWatermark || (d.updated_at && d.updated_at > decksPushWatermark)
     )
     if (localDecks.length > 0) {
-      const rows = localDecks.map(d => ({
+      const deckRows = localDecks.map(d => ({
         id: d.id,
         user_id: userId,
         name: d.name,
@@ -218,15 +250,18 @@ export async function runSync(): Promise<void> {
         updated_at: d.updated_at || d.created_at,
         deleted_at: d.deleted_at || null
       }))
-      await sb.from('decks').upsert(rows, { onConflict: 'id' })
+      const { error: decksErr } = await sb.from('decks').upsert(deckRows, { onConflict: 'id' })
+      if (decksErr) console.error('sync push failed: decks', decksErr)
+      else advancePushWatermark(store, 'decks', deckRows)
     }
 
     // ========== Cards PUSH ==========
+    const cardsPushWatermark = getPushWatermark(store, 'cards')
     const localCards = store.cards.filter(
-      c => !cardsSince || (c.updated_at && c.updated_at > cardsSince)
+      c => !cardsPushWatermark || (c.updated_at && c.updated_at > cardsPushWatermark)
     )
     if (localCards.length > 0) {
-      const rows = localCards.map(c => ({
+      const cardRows = localCards.map(c => ({
         id: c.id,
         user_id: userId,
         deck_id: c.deck_id,
@@ -238,7 +273,9 @@ export async function runSync(): Promise<void> {
         updated_at: c.updated_at || c.created_at,
         deleted_at: c.deleted_at || null
       }))
-      await sb.from('cards').upsert(rows, { onConflict: 'id' })
+      const { error: cardsErr } = await sb.from('cards').upsert(cardRows, { onConflict: 'id' })
+      if (cardsErr) console.error('sync push failed: cards', cardsErr)
+      else advancePushWatermark(store, 'cards', cardRows)
     }
 
     // ========== Decks PULL ==========
@@ -311,17 +348,13 @@ export async function runSync(): Promise<void> {
       }
     }
 
-    // First-time full push for todos (added after initial release).
-    // Bypass `since` filter so pre-existing local data gets uploaded once.
-    const todosFirstSync = !store.sync_meta.todos_synced_once
-    const todosSince = todosFirstSync ? null : since
-
     // ========== Todos PUSH ==========
+    const todosPushWatermark = getPushWatermark(store, 'todos')
     const localTodos = store.todos.filter(
-      t => !todosSince || (t.updated_at && t.updated_at > todosSince)
+      t => !todosPushWatermark || (t.updated_at && t.updated_at > todosPushWatermark)
     )
     if (localTodos.length > 0) {
-      const rows = localTodos.map(t => ({
+      const todoRows = localTodos.map(t => ({
         id: t.id,
         user_id: userId,
         title: t.title,
@@ -334,7 +367,9 @@ export async function runSync(): Promise<void> {
         updated_at: t.updated_at || t.created_at,
         deleted_at: t.deleted_at || null
       }))
-      await sb.from('todos').upsert(rows, { onConflict: 'id' })
+      const { error: todosErr } = await sb.from('todos').upsert(todoRows, { onConflict: 'id' })
+      if (todosErr) console.error('sync push failed: todos', todosErr)
+      else advancePushWatermark(store, 'todos', todoRows)
     }
 
     // ========== Todos PULL ==========
@@ -375,18 +410,15 @@ export async function runSync(): Promise<void> {
       }
     }
 
-    // First-time full push for snippet folders + snippets.
-    const snippetFoldersFirstSync = !store.sync_meta.snippet_folders_synced_once
-    const snippetFoldersSince = snippetFoldersFirstSync ? null : since
-    const snippetsFirstSync = !store.sync_meta.snippets_synced_once
-    const snippetsSince = snippetsFirstSync ? null : since
-
     // ========== Snippet Folders PUSH ==========
+    const snippetFoldersPushWatermark = getPushWatermark(store, 'snippet_folders')
     const localFolders = store.snippet_folders.filter(
-      f => !snippetFoldersSince || (f.updated_at && f.updated_at > snippetFoldersSince)
+      f =>
+        !snippetFoldersPushWatermark ||
+        (f.updated_at && f.updated_at > snippetFoldersPushWatermark)
     )
     if (localFolders.length > 0) {
-      const rows = localFolders.map(f => ({
+      const folderRows = localFolders.map(f => ({
         id: f.id,
         user_id: userId,
         name: f.name,
@@ -395,7 +427,11 @@ export async function runSync(): Promise<void> {
         updated_at: f.updated_at || f.created_at,
         deleted_at: f.deleted_at || null
       }))
-      await sb.from('snippet_folders').upsert(rows, { onConflict: 'id' })
+      const { error: foldersErr } = await sb
+        .from('snippet_folders')
+        .upsert(folderRows, { onConflict: 'id' })
+      if (foldersErr) console.error('sync push failed: snippet_folders', foldersErr)
+      else advancePushWatermark(store, 'snippet_folders', folderRows)
     }
 
     // ========== Snippet Folders PULL ==========
@@ -432,11 +468,13 @@ export async function runSync(): Promise<void> {
     }
 
     // ========== Snippets PUSH ==========
+    const snippetsPushWatermark = getPushWatermark(store, 'snippets')
     const localSnippets = store.snippets.filter(
-      sn => !snippetsSince || (sn.updated_at && sn.updated_at > snippetsSince)
+      sn =>
+        !snippetsPushWatermark || (sn.updated_at && sn.updated_at > snippetsPushWatermark)
     )
     if (localSnippets.length > 0) {
-      const rows = localSnippets.map(sn => ({
+      const snippetRows = localSnippets.map(sn => ({
         id: sn.id,
         user_id: userId,
         folder_id: sn.folder_id || null,
@@ -447,7 +485,11 @@ export async function runSync(): Promise<void> {
         updated_at: sn.updated_at || sn.created_at,
         deleted_at: sn.deleted_at || null
       }))
-      await sb.from('snippets').upsert(rows, { onConflict: 'id' })
+      const { error: snippetsErr } = await sb
+        .from('snippets')
+        .upsert(snippetRows, { onConflict: 'id' })
+      if (snippetsErr) console.error('sync push failed: snippets', snippetsErr)
+      else advancePushWatermark(store, 'snippets', snippetRows)
     }
 
     // ========== Snippets PULL ==========
@@ -486,18 +528,15 @@ export async function runSync(): Promise<void> {
       }
     }
 
-    // First-time full push for achievements / badge_events (added in P1).
-    const achievementsFirstSync = !store.sync_meta.achievements_synced_once
-    const achievementsSince = achievementsFirstSync ? null : since
-    const badgeEventsFirstSync = !store.sync_meta.badge_events_synced_once
-    const badgeEventsSince = badgeEventsFirstSync ? null : since
-
     // ========== Achievements PUSH ==========
+    const achievementsPushWatermark = getPushWatermark(store, 'achievements')
     const localAchievements = store.achievements.filter(
-      a => !achievementsSince || (a.updated_at && a.updated_at > achievementsSince)
+      a =>
+        !achievementsPushWatermark ||
+        (a.updated_at && a.updated_at > achievementsPushWatermark)
     )
     if (localAchievements.length > 0) {
-      const rows = localAchievements.map(a => ({
+      const achievementRows = localAchievements.map(a => ({
         id: a.id,
         user_id: userId,
         code: a.code,
@@ -508,7 +547,11 @@ export async function runSync(): Promise<void> {
         updated_at: a.updated_at || a.created_at,
         deleted_at: a.deleted_at || null
       }))
-      await sb.from('achievements').upsert(rows, { onConflict: 'id' })
+      const { error: achievementsErr } = await sb
+        .from('achievements')
+        .upsert(achievementRows, { onConflict: 'id' })
+      if (achievementsErr) console.error('sync push failed: achievements', achievementsErr)
+      else advancePushWatermark(store, 'achievements', achievementRows)
     }
 
     // ========== Achievements PULL ==========
@@ -548,11 +591,14 @@ export async function runSync(): Promise<void> {
     }
 
     // ========== Badge Events PUSH ==========
+    const badgeEventsPushWatermark = getPushWatermark(store, 'badge_events')
     const localBadgeEvents = store.badge_events.filter(
-      e => !badgeEventsSince || (e.updated_at && e.updated_at > badgeEventsSince)
+      e =>
+        !badgeEventsPushWatermark ||
+        (e.updated_at && e.updated_at > badgeEventsPushWatermark)
     )
     if (localBadgeEvents.length > 0) {
-      const rows = localBadgeEvents.map(e => ({
+      const badgeRows = localBadgeEvents.map(e => ({
         id: e.id,
         user_id: userId,
         event_type: e.event_type,
@@ -568,7 +614,11 @@ export async function runSync(): Promise<void> {
         updated_at: e.updated_at || e.created_at,
         deleted_at: e.deleted_at || null
       }))
-      await sb.from('badge_events').upsert(rows, { onConflict: 'id' })
+      const { error: badgeErr } = await sb
+        .from('badge_events')
+        .upsert(badgeRows, { onConflict: 'id' })
+      if (badgeErr) console.error('sync push failed: badge_events', badgeErr)
+      else advancePushWatermark(store, 'badge_events', badgeRows)
     }
 
     // ========== Badge Events PULL ==========
@@ -664,14 +714,11 @@ export async function runSync(): Promise<void> {
       }
     }
 
-    // Update sync timestamp
+    // Update wall-clock sync timestamp for display purposes. Push/pull filters
+    // no longer rely on this — see push_watermarks / pull_watermarks above.
+    // Legacy *_synced_once flags remain on the store for back-compat but are
+    // ignored by the new watermark-based logic.
     store.sync_meta.last_sync_at = new Date().toISOString()
-    store.sync_meta.cards_synced_once = true
-    store.sync_meta.todos_synced_once = true
-    store.sync_meta.achievements_synced_once = true
-    store.sync_meta.badge_events_synced_once = true
-    store.sync_meta.snippets_synced_once = true
-    store.sync_meta.snippet_folders_synced_once = true
     lastSyncAt = store.sync_meta.last_sync_at
     saveStore()
 
