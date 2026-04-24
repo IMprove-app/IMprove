@@ -51,6 +51,8 @@ import {
   deleteSnippetFolder,
   getSettings,
   updateSettings,
+  getActiveTodosForBar,
+  reorderBarTodos,
   HabitRow,
   TodoRow,
   AchievementRow,
@@ -64,6 +66,8 @@ import { runSync, getSyncStatus } from './sync'
 import { getMainWindow } from './index'
 import { toggleHud, hideHud, setHudPinned } from './hud'
 import { toggleScratch, hideScratch, setScratchPinned } from './scratch'
+import { toggleTasks, hideTasks, setTasksPinned } from './tasks'
+import { startTimer, pauseTimer, getActive, getElapsedMap } from './tasks-timer'
 import { setSlotHotkey, getRegisteredSlot } from './hotkey'
 
 function broadcastSnippetsChanged(): void {
@@ -322,26 +326,39 @@ export function registerIpcHandlers(): void {
   })
 
   // ====== Todos ======
+  // Broadcast any todo mutation so every open window (main TodosPage +
+  // floating tasks bar) can refresh — the tasks bar IS the todos list now.
+  function broadcastTodosChanged(): void {
+    for (const win of BrowserWindow.getAllWindows()) {
+      if (!win.isDestroyed()) win.webContents.send('tasks:todos-changed')
+    }
+  }
+
   ipcMain.handle('todos:list', () => {
     return getAllTodos()
   })
 
   ipcMain.handle('todos:create', (_e, data: { title: string; notes?: string; due_date: string; sort_order?: number }) => {
-    return createTodo({
+    const row = createTodo({
       id: uuidv4(),
       title: data.title,
       notes: data.notes,
       due_date: data.due_date,
       sort_order: data.sort_order
     })
+    broadcastTodosChanged()
+    return row
   })
 
   ipcMain.handle('todos:update', (_e, id: string, updates: Partial<TodoRow>) => {
-    return updateTodo(id, updates)
+    const row = updateTodo(id, updates)
+    broadcastTodosChanged()
+    return row
   })
 
   ipcMain.handle('todos:delete', (_e, id: string) => {
     deleteTodo(id)
+    broadcastTodosChanged()
     return { ok: true }
   })
 
@@ -615,6 +632,69 @@ export function registerIpcHandlers(): void {
       win?.webContents.send('hotkey:conflict', { accel, error: outcome.error })
     }
     return { ...outcome, active: getRegisteredSlot('scratch') }
+  })
+
+  // ====== Tasks Progress Bar ======
+  ipcMain.handle('tasks:toggle', () => {
+    toggleTasks()
+  })
+
+  ipcMain.handle('tasks:hide', () => {
+    hideTasks()
+  })
+
+  ipcMain.handle('tasks:get-pinned', () => {
+    return getSettings().tasksPinned === true
+  })
+
+  ipcMain.handle('tasks:set-pinned', (_e, pinned: boolean) => {
+    setTasksPinned(!!pinned)
+    for (const win of BrowserWindow.getAllWindows()) {
+      if (!win.isDestroyed()) win.webContents.send('tasks:pinned-changed', !!pinned)
+    }
+    return { ok: true }
+  })
+
+  ipcMain.handle('tasks:list-todos', () => {
+    return getActiveTodosForBar()
+  })
+
+  ipcMain.handle('tasks:reorder', (_e, ids: string[]) => {
+    if (!Array.isArray(ids)) return { ok: false }
+    reorderBarTodos(ids)
+    broadcastTodosChanged()
+    return { ok: true }
+  })
+
+  ipcMain.handle('tasks:get-elapsed-map', () => {
+    return getElapsedMap()
+  })
+
+  ipcMain.handle('tasks:start', (_e, todoId: string) => {
+    startTimer(todoId)
+    return { ok: true }
+  })
+
+  ipcMain.handle('tasks:pause', () => {
+    pauseTimer()
+    return { ok: true }
+  })
+
+  ipcMain.handle('tasks:get-active', () => {
+    return getActive()
+  })
+
+  ipcMain.handle('settings:get-tasks-hotkey', () => {
+    return getSettings().tasksHotkey ?? ''
+  })
+
+  ipcMain.handle('settings:set-tasks-hotkey', (_e, accel: string) => {
+    const outcome = setSlotHotkey('tasks', accel)
+    if (!outcome.ok) {
+      const win = getMainWindow()
+      win?.webContents.send('hotkey:conflict', { accel, error: outcome.error })
+    }
+    return { ...outcome, active: getRegisteredSlot('tasks') }
   })
 
   // ====== Window Controls ======

@@ -104,7 +104,7 @@ export interface SnippetRow {
 }
 
 // App-level settings persisted to the local store (not synced).
-// `hudHotkey` / `scratchHotkey` are Electron accelerator strings; empty string disables.
+// `hudHotkey` / `scratchHotkey` / `tasksHotkey` are Electron accelerator strings; empty string disables.
 export interface AppSettings {
   hudHotkey: string
   hudPinned: boolean
@@ -113,10 +113,14 @@ export interface AppSettings {
   scratchPinned: boolean
   scratchBounds?: { x: number; y: number; width: number; height: number }
   scratchDraft?: string
+  tasksHotkey: string
+  tasksPinned: boolean
+  tasksBounds?: { x: number; y: number; width: number; height: number }
 }
 
 export const DEFAULT_HUD_HOTKEY = 'CommandOrControl+Shift+E'
 export const DEFAULT_SCRATCH_HOTKEY = 'CommandOrControl+Shift+Q'
+export const DEFAULT_TASKS_HOTKEY = 'CommandOrControl+Shift+W'
 
 function defaultSettings(): AppSettings {
   return {
@@ -124,7 +128,9 @@ function defaultSettings(): AppSettings {
     hudPinned: false,
     scratchHotkey: DEFAULT_SCRATCH_HOTKEY,
     scratchPinned: false,
-    scratchDraft: ''
+    scratchDraft: '',
+    tasksHotkey: DEFAULT_TASKS_HOTKEY,
+    tasksPinned: false
   }
 }
 
@@ -156,6 +162,18 @@ export interface TodoRow {
   is_done: number
   completed_at?: string
   sort_order: number
+  in_tasks_bar?: number
+  created_at: string
+  updated_at?: string
+  deleted_at?: string
+}
+
+export interface TaskSessionRow {
+  id: string
+  todo_id: string
+  started_at: string
+  ended_at?: string
+  active_sec: number
   created_at: string
   updated_at?: string
   deleted_at?: string
@@ -233,6 +251,7 @@ export interface StoreData {
   user_progress: UserProgress
   snippets: SnippetRow[]
   snippet_folders: SnippetFolderRow[]
+  task_sessions: TaskSessionRow[]
   settings: AppSettings
   sync_meta?: SyncMeta
 }
@@ -264,6 +283,7 @@ export function loadStore(): StoreData {
     user_progress: defaultUserProgress(),
     snippets: [],
     snippet_folders: [],
+    task_sessions: [],
     settings: defaultSettings(),
     sync_meta: { last_sync_at: null, user_id: null }
   }
@@ -303,6 +323,11 @@ export function loadStore(): StoreData {
       // Snippet HUD: backfill snippets array + settings on legacy stores.
       if (!store.snippets) store.snippets = []
       if (!store.snippet_folders) store.snippet_folders = []
+      // Tasks bar: backfill task_sessions + in_tasks_bar field on legacy stores.
+      if (!store.task_sessions) store.task_sessions = []
+      for (const t of store.todos) {
+        if (typeof t.in_tasks_bar !== 'number') t.in_tasks_bar = 0
+      }
       if (!store.settings) {
         store.settings = defaultSettings()
       } else {
@@ -320,6 +345,12 @@ export function loadStore(): StoreData {
         }
         if (typeof store.settings.scratchDraft !== 'string') {
           store.settings.scratchDraft = ''
+        }
+        if (typeof store.settings.tasksHotkey !== 'string') {
+          store.settings.tasksHotkey = DEFAULT_TASKS_HOTKEY
+        }
+        if (typeof store.settings.tasksPinned !== 'boolean') {
+          store.settings.tasksPinned = false
         }
       }
       // Folder migration: if snippets exist but have no folder_id, create a
@@ -1107,6 +1138,87 @@ export function touchSnippet(id: string): void {
     s.snippets[idx].updated_at = new Date().toISOString()
     saveStore()
   }
+}
+
+// ============ Task Sessions (Tasks progress bar) ============
+
+export function appendTaskSession(row: TaskSessionRow): TaskSessionRow {
+  const s = loadStore()
+  const now = new Date().toISOString()
+  const next: TaskSessionRow = {
+    ...row,
+    updated_at: row.updated_at || now
+  }
+  s.task_sessions.push(next)
+  saveStore()
+  return next
+}
+
+export function listTaskSessions(): TaskSessionRow[] {
+  const s = loadStore()
+  return s.task_sessions.filter(r => !r.deleted_at)
+}
+
+export function softDeleteTaskSession(id: string): void {
+  const s = loadStore()
+  const idx = s.task_sessions.findIndex(r => r.id === id)
+  if (idx !== -1) {
+    const now = new Date().toISOString()
+    s.task_sessions[idx].deleted_at = now
+    s.task_sessions[idx].updated_at = now
+    saveStore()
+  }
+}
+
+// Active todos for the tasks bar: not deleted, not done, ordered by the
+// user-controlled sort_order (drag reorder / promote-on-start mutate this
+// shared field). The bar is a linear queue, decoupled from the TodosPage's
+// due-date bucketing.
+export function getActiveTodosForBar(): TodoRow[] {
+  const s = loadStore()
+  return s.todos
+    .filter(t => !t.deleted_at && t.is_done !== 1)
+    .sort((a, b) => {
+      if (a.sort_order !== b.sort_order) return a.sort_order - b.sort_order
+      return a.created_at < b.created_at ? -1 : 1
+    })
+}
+
+// Batch-renumber sort_order from a caller-supplied id list. Any active todo
+// not in the list keeps its existing sort_order; typical use is a full drag
+// reorder where the renderer sends the complete new ordering.
+export function reorderBarTodos(ids: string[]): void {
+  const s = loadStore()
+  const now = new Date().toISOString()
+  ids.forEach((id, index) => {
+    const idx = s.todos.findIndex(t => t.id === id)
+    if (idx === -1) return
+    s.todos[idx] = {
+      ...s.todos[idx],
+      sort_order: index * 100,
+      updated_at: now
+    }
+  })
+  saveStore()
+}
+
+// Promote a todo to the top of the tasks bar by dropping its sort_order
+// below the current minimum among active rows. Called when a timer starts
+// so the running task always appears first.
+export function promoteTodoInBar(id: string): void {
+  const s = loadStore()
+  const active = s.todos.filter(t => !t.deleted_at && t.is_done !== 1)
+  if (active.length === 0) return
+  const minOrder = Math.min(...active.map(t => t.sort_order ?? 0))
+  const idx = s.todos.findIndex(t => t.id === id)
+  if (idx === -1) return
+  if (s.todos[idx].sort_order === minOrder - 100) return
+  s.todos[idx] = {
+    ...s.todos[idx],
+    sort_order: minOrder - 100,
+    updated_at: new Date().toISOString()
+  }
+  saveStore()
 }
 
 // ============ Settings ============

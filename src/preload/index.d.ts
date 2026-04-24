@@ -237,6 +237,25 @@ interface API {
   getScratchHotkey(): Promise<string>
   setScratchHotkey(accel: string): Promise<{ ok: boolean; error?: string; active?: string }>
 
+  // Tasks (任务进行栏) window
+  tasksToggle(): Promise<void>
+  tasksHide(): Promise<void>
+  tasksGetPinned(): Promise<boolean>
+  tasksSetPinned(pinned: boolean): Promise<void>
+  onTasksPinnedChanged(callback: (pinned: boolean) => void): () => void
+  tasksListTodos(): Promise<TodoData[]>
+  tasksReorder(ids: string[]): Promise<{ ok: boolean }>
+  onTasksTodosChanged(callback: () => void): () => void
+  tasksGetElapsedMap(): Promise<Record<string, number>>
+  tasksStart(todoId: string): Promise<void>
+  tasksPause(): Promise<void>
+  tasksGetActive(): Promise<{ todoId: string; startedAt: number } | null>
+  onTasksActiveChanged(
+    callback: (payload: { todoId: string | null; startedAt: number | null }) => void
+  ): () => void
+  getTasksHotkey(): Promise<string>
+  setTasksHotkey(accel: string): Promise<{ ok: boolean; error?: string; active?: string }>
+
   // Progress & Achievements
   getProgress(): Promise<UserProgressData>
   listAchievements(): Promise<AchievementData[]>

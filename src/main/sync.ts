@@ -12,7 +12,8 @@ import {
   BadgeEventRow,
   UserProgress,
   SnippetRow,
-  SnippetFolderRow
+  SnippetFolderRow,
+  TaskSessionRow
 } from './db'
 
 export type SyncState = 'idle' | 'syncing' | 'error' | 'offline'
@@ -363,6 +364,7 @@ export async function runSync(): Promise<void> {
         is_done: t.is_done,
         completed_at: t.completed_at || null,
         sort_order: t.sort_order,
+        in_tasks_bar: t.in_tasks_bar ?? 0,
         created_at: t.created_at,
         updated_at: t.updated_at || t.created_at,
         deleted_at: t.deleted_at || null
@@ -392,6 +394,7 @@ export async function runSync(): Promise<void> {
           is_done: remote.is_done,
           completed_at: remote.completed_at || undefined,
           sort_order: remote.sort_order,
+          in_tasks_bar: remote.in_tasks_bar ?? 0,
           created_at: remote.created_at,
           updated_at: remote.updated_at,
           deleted_at: remote.deleted_at || undefined
@@ -405,6 +408,69 @@ export async function runSync(): Promise<void> {
           const remoteTime = remote.updated_at || remote.created_at
           if (remoteTime > localTime) {
             store.todos[localIdx] = remoteRow
+          }
+        }
+      }
+    }
+
+    // ========== Task Sessions PUSH (only completed — ended_at != null) ==========
+    const taskSessionsPushWatermark = getPushWatermark(store, 'task_sessions')
+    const localTaskSessions = store.task_sessions.filter(
+      r =>
+        r.ended_at != null &&
+        (!taskSessionsPushWatermark ||
+          (r.updated_at && r.updated_at > taskSessionsPushWatermark))
+    )
+    if (localTaskSessions.length > 0) {
+      const taskSessionRows = localTaskSessions.map(r => ({
+        id: r.id,
+        user_id: userId,
+        todo_id: r.todo_id,
+        started_at: r.started_at,
+        ended_at: r.ended_at,
+        active_sec: r.active_sec,
+        created_at: r.created_at,
+        updated_at: r.updated_at || r.created_at,
+        deleted_at: r.deleted_at || null
+      }))
+      const { error: taskSessionsErr } = await sb
+        .from('task_sessions')
+        .upsert(taskSessionRows, { onConflict: 'id' })
+      if (taskSessionsErr) console.error('sync push failed: task_sessions', taskSessionsErr)
+      else advancePushWatermark(store, 'task_sessions', taskSessionRows)
+    }
+
+    // ========== Task Sessions PULL ==========
+    const taskSessionsWatermark = getPullWatermark(store, 'task_sessions')
+    let taskSessionsQuery = sb.from('task_sessions').select('*').eq('user_id', userId)
+    if (taskSessionsWatermark) {
+      taskSessionsQuery = taskSessionsQuery.gt('updated_at', taskSessionsWatermark)
+    }
+    const { data: remoteTaskSessions } = await taskSessionsQuery
+    advancePullWatermark(store, 'task_sessions', remoteTaskSessions)
+
+    if (remoteTaskSessions && remoteTaskSessions.length > 0) {
+      for (const remote of remoteTaskSessions) {
+        const localIdx = store.task_sessions.findIndex(r => r.id === remote.id)
+        const remoteRow: TaskSessionRow = {
+          id: remote.id,
+          todo_id: remote.todo_id,
+          started_at: remote.started_at,
+          ended_at: remote.ended_at || undefined,
+          active_sec: remote.active_sec ?? 0,
+          created_at: remote.created_at,
+          updated_at: remote.updated_at,
+          deleted_at: remote.deleted_at || undefined
+        }
+
+        if (localIdx === -1) {
+          store.task_sessions.push(remoteRow)
+        } else {
+          const local = store.task_sessions[localIdx]
+          const localTime = local.updated_at || local.created_at
+          const remoteTime = remote.updated_at || remote.created_at
+          if (remoteTime > localTime) {
+            store.task_sessions[localIdx] = remoteRow
           }
         }
       }

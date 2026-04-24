@@ -9,6 +9,8 @@ import { initSupabase, getAuthStatus } from './supabase'
 import { runSync, startPeriodicSync, stopPeriodicSync } from './sync'
 import { createHud, toggleHud } from './hud'
 import { createScratch, toggleScratch } from './scratch'
+import { createTasks, toggleTasks } from './tasks'
+import { flushActive } from './tasks-timer'
 import { initHotkeys, unregisterAllHotkeys } from './hotkey'
 
 let mainWindow: BrowserWindow | null = null
@@ -75,10 +77,11 @@ app.whenReady().then(async () => {
 
   registerIpcHandlers()
   createWindow()
-  createTray(mainWindow!, toggleHud, toggleScratch)
-  // Pre-create HUD + Scratch windows hidden so first hotkey press opens instantly.
+  createTray(mainWindow!, toggleHud, toggleScratch, toggleTasks)
+  // Pre-create HUD + Scratch + Tasks windows hidden so first hotkey press opens instantly.
   createHud()
   createScratch()
+  createTasks()
   initHotkeys()
 
   // Auto-updater (only in production)
@@ -138,6 +141,8 @@ app.on('before-quit', () => {
   app.isQuitting = true
   stopPeriodicSync()
   unregisterAllHotkeys()
+  // Persist any in-flight tasks timer so active_sec isn't lost across quits.
+  flushActive()
   closeDb()
 })
 

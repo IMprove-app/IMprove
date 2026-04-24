@@ -4,12 +4,14 @@ import {
   updateSettings,
   DEFAULT_HUD_HOTKEY,
   DEFAULT_SCRATCH_HOTKEY,
+  DEFAULT_TASKS_HOTKEY,
   AppSettings
 } from './db'
 import { toggleHud } from './hud'
 import { toggleScratch } from './scratch'
+import { toggleTasks } from './tasks'
 
-export type HotkeySlot = 'hud' | 'scratch'
+export type HotkeySlot = 'hud' | 'scratch' | 'tasks'
 
 interface SlotConfig {
   action: () => void
@@ -18,12 +20,16 @@ interface SlotConfig {
 
 const slotConfigs: Record<HotkeySlot, SlotConfig> = {
   hud: { action: () => toggleHud(), settingsKey: 'hudHotkey' },
-  scratch: { action: () => toggleScratch(), settingsKey: 'scratchHotkey' }
+  scratch: { action: () => toggleScratch(), settingsKey: 'scratchHotkey' },
+  tasks: { action: () => toggleTasks(), settingsKey: 'tasksHotkey' }
 }
+
+const ALL_SLOTS: HotkeySlot[] = ['hud', 'scratch', 'tasks']
 
 const registered: Record<HotkeySlot, string> = {
   hud: '',
-  scratch: ''
+  scratch: '',
+  tasks: ''
 }
 
 function safeUnregister(accel: string): void {
@@ -35,8 +41,14 @@ function safeUnregister(accel: string): void {
   }
 }
 
-function otherSlot(slot: HotkeySlot): HotkeySlot {
-  return slot === 'hud' ? 'scratch' : 'hud'
+// Generic cross-slot collision check: the proposed accelerator must not equal
+// any other slot's currently-registered accelerator.
+function collidesWithOtherSlot(slot: HotkeySlot, accel: string): boolean {
+  for (const other of ALL_SLOTS) {
+    if (other === slot) continue
+    if (registered[other] && registered[other] === accel) return true
+  }
+  return false
 }
 
 function registerSlot(slot: HotkeySlot, accel: string): { ok: boolean; error?: string } {
@@ -51,8 +63,7 @@ function registerSlot(slot: HotkeySlot, accel: string): { ok: boolean; error?: s
   }
 
   // Reject cross-slot collision before touching anything.
-  const other = otherSlot(slot)
-  if (next === registered[other] && registered[other] !== '') {
+  if (collidesWithOtherSlot(slot, next)) {
     return { ok: false, error: '与另一个快捷键冲突' }
   }
 
@@ -125,14 +136,17 @@ export function initHotkeys(): void {
   const settings = getSettings()
   const hud = settings.hudHotkey || DEFAULT_HUD_HOTKEY
   const scratch = settings.scratchHotkey || DEFAULT_SCRATCH_HOTKEY
+  const tasks = settings.tasksHotkey || DEFAULT_TASKS_HOTKEY
   registerSlot('hud', hud)
   registerSlot('scratch', scratch)
+  registerSlot('tasks', tasks)
 }
 
 export function unregisterAllHotkeys(): void {
   globalShortcut.unregisterAll()
   registered.hud = ''
   registered.scratch = ''
+  registered.tasks = ''
 }
 
 // ===== Legacy single-slot wrappers (kept so existing callers keep compiling) =====
@@ -148,6 +162,11 @@ export function setHudHotkey(accel: string): { ok: boolean; error?: string } {
 export function initHudHotkey(): void {
   const settings = getSettings()
   registerSlot('hud', settings.hudHotkey || DEFAULT_HUD_HOTKEY)
+}
+
+export function initTasksHotkey(): void {
+  const settings = getSettings()
+  registerSlot('tasks', settings.tasksHotkey || DEFAULT_TASKS_HOTKEY)
 }
 
 export function getRegisteredHotkey(): string {

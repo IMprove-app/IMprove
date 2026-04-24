@@ -5,6 +5,7 @@ import HotkeyCapture from '../components/HotkeyCapture'
 
 const DEFAULT_HUD_HOTKEY = 'CommandOrControl+Shift+E'
 const DEFAULT_SCRATCH_HOTKEY = 'CommandOrControl+Shift+Q'
+const DEFAULT_TASKS_HOTKEY = 'CommandOrControl+Shift+W'
 
 interface SnippetData {
   id: string
@@ -54,6 +55,9 @@ function Settings({ onBack, loggedIn, onLogout, onLogin }: Props): JSX.Element {
   // Scratch Pad state
   const [scratchHotkey, setScratchHotkey] = useState<string>('')
   const [scratchPinned, setScratchPinned] = useState(false)
+  // Tasks progress bar state
+  const [tasksHotkey, setTasksHotkey] = useState<string>('')
+  const [tasksPinned, setTasksPinned] = useState(false)
   const [snippets, setSnippets] = useState<SnippetData[]>([])
   const [folders, setFolders] = useState<SnippetFolderData[]>([])
   const [editingId, setEditingId] = useState<string | null>(null)
@@ -93,11 +97,15 @@ function Settings({ onBack, loggedIn, onLogout, onLogin }: Props): JSX.Element {
     window.api.getScratchHotkey().then(setScratchHotkey).catch(() => {})
     window.api.getScratchPinned().then(setScratchPinned).catch(() => {})
     const offScratchPin = window.api.onScratchPinnedChanged(setScratchPinned)
+    window.api.getTasksHotkey().then(setTasksHotkey).catch(() => {})
+    window.api.tasksGetPinned().then(setTasksPinned).catch(() => {})
+    const offTasksPin = window.api.onTasksPinnedChanged(setTasksPinned)
     return () => {
       off()
       offFolders()
       offPin()
       offScratchPin()
+      offTasksPin()
     }
   }, [])
 
@@ -182,6 +190,22 @@ function Settings({ onBack, loggedIn, onLogout, onLogin }: Props): JSX.Element {
     const next = !scratchPinned
     setScratchPinned(next)
     await window.api.setScratchPinned(next)
+  }
+
+  const handleOpenTasks = async (): Promise<void> => {
+    await window.api.tasksToggle()
+  }
+
+  const handleSetTasksHotkey = async (accel: string): Promise<{ ok: boolean; error?: string; active?: string }> => {
+    const result = await window.api.setTasksHotkey(accel)
+    if (result.ok) setTasksHotkey(accel)
+    return result
+  }
+
+  const handleToggleTasksPinned = async (): Promise<void> => {
+    const next = !tasksPinned
+    setTasksPinned(next)
+    await window.api.tasksSetPinned(next)
   }
 
   const updateReduceMotion = (value: boolean | null): void => {
@@ -620,6 +644,53 @@ function Settings({ onBack, loggedIn, onLogout, onLogin }: Props): JSX.Element {
             <span
               className="absolute top-0.5 w-4 h-4 bg-white rounded-full shadow transition-transform"
               style={{ transform: scratchPinned ? 'translateX(22px)' : 'translateX(2px)' }}
+            />
+          </button>
+        </div>
+      </div>
+
+      {/* Tasks progress bar (任务进行栏) */}
+      <div className="glass-card p-4 mb-4">
+        <div className="flex items-center justify-between mb-3">
+          <h3 className="text-sm font-semibold text-txt-secondary">任务进行栏 · 快捷键</h3>
+          <motion.button
+            onClick={handleOpenTasks}
+            className="text-[10px] px-2 py-1 rounded-md bg-accent-cyan/10 text-accent-cyan border border-accent-cyan/20 hover:bg-accent-cyan/20 transition-colors"
+            whileTap={{ scale: 0.95 }}
+          >
+            打开任务进行栏
+          </motion.button>
+        </div>
+
+        <p className="text-[10px] text-txt-muted mb-3 leading-relaxed">
+          一个小巧的浮动条，展示你钉到这里的待办。点击任务即可启动秒表，再次点击暂停；同一时间只会运行一个计时。
+        </p>
+
+        {/* Hotkey */}
+        <div className="mb-3">
+          <p className="text-[11px] text-txt-primary font-medium mb-1.5">唤醒快捷键</p>
+          <HotkeyCapture
+            value={tasksHotkey}
+            onChange={handleSetTasksHotkey}
+            defaultAccel={DEFAULT_TASKS_HOTKEY}
+          />
+        </div>
+
+        {/* Pin default */}
+        <div className="flex items-center justify-between">
+          <div>
+            <p className="text-[11px] text-txt-primary font-medium">默认置顶在最前方</p>
+            <p className="text-[10px] text-txt-muted mt-0.5">保持任务进行栏始终可见，不会被其他窗口遮挡</p>
+          </div>
+          <button
+            onClick={handleToggleTasksPinned}
+            className={`relative w-10 h-5 rounded-full transition-colors ${
+              tasksPinned ? 'bg-accent-cyan' : 'bg-bg-border'
+            }`}
+          >
+            <span
+              className="absolute top-0.5 w-4 h-4 bg-white rounded-full shadow transition-transform"
+              style={{ transform: tasksPinned ? 'translateX(22px)' : 'translateX(2px)' }}
             />
           </button>
         </div>

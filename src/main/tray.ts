@@ -39,7 +39,8 @@ function createTrayIcon(): Electron.NativeImage {
 export function createTray(
   mainWindow: BrowserWindow,
   onToggleHud?: () => void,
-  onToggleScratch?: () => void
+  onToggleScratch?: () => void,
+  onToggleTasks?: () => void
 ): Tray {
   const icon = createTrayIcon()
   tray = new Tray(icon)
@@ -66,6 +67,13 @@ export function createTray(
     items.push({
       label: '草稿纸',
       click: () => onToggleScratch()
+    })
+  }
+
+  if (onToggleTasks) {
+    items.push({
+      label: '任务进行栏',
+      click: () => onToggleTasks()
     })
   }
 

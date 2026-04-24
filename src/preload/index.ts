@@ -128,6 +128,40 @@ const api = {
   getScratchHotkey: () => ipcRenderer.invoke('settings:get-scratch-hotkey'),
   setScratchHotkey: (accel: string) => ipcRenderer.invoke('settings:set-scratch-hotkey', accel),
 
+  // Tasks (任务进行栏) window
+  tasksToggle: () => ipcRenderer.invoke('tasks:toggle'),
+  tasksHide: () => ipcRenderer.invoke('tasks:hide'),
+  tasksGetPinned: () => ipcRenderer.invoke('tasks:get-pinned'),
+  tasksSetPinned: (pinned: boolean) => ipcRenderer.invoke('tasks:set-pinned', pinned),
+  onTasksPinnedChanged: (callback: (pinned: boolean) => void) => {
+    const handler = (_e: unknown, pinned: boolean): void => callback(pinned)
+    ipcRenderer.on('tasks:pinned-changed', handler)
+    return () => { ipcRenderer.removeListener('tasks:pinned-changed', handler) }
+  },
+  tasksListTodos: () => ipcRenderer.invoke('tasks:list-todos'),
+  tasksReorder: (ids: string[]) => ipcRenderer.invoke('tasks:reorder', ids),
+  onTasksTodosChanged: (callback: () => void) => {
+    const handler = (): void => callback()
+    ipcRenderer.on('tasks:todos-changed', handler)
+    return () => { ipcRenderer.removeListener('tasks:todos-changed', handler) }
+  },
+  tasksGetElapsedMap: () => ipcRenderer.invoke('tasks:get-elapsed-map'),
+  tasksStart: (todoId: string) => ipcRenderer.invoke('tasks:start', todoId),
+  tasksPause: () => ipcRenderer.invoke('tasks:pause'),
+  tasksGetActive: () => ipcRenderer.invoke('tasks:get-active'),
+  onTasksActiveChanged: (
+    callback: (payload: { todoId: string | null; startedAt: number | null }) => void
+  ) => {
+    const handler = (
+      _e: unknown,
+      payload: { todoId: string | null; startedAt: number | null }
+    ): void => callback(payload)
+    ipcRenderer.on('tasks:active-changed', handler)
+    return () => { ipcRenderer.removeListener('tasks:active-changed', handler) }
+  },
+  getTasksHotkey: () => ipcRenderer.invoke('settings:get-tasks-hotkey'),
+  setTasksHotkey: (accel: string) => ipcRenderer.invoke('settings:set-tasks-hotkey', accel),
+
   // Progress & Achievements
   getProgress: () => ipcRenderer.invoke('progress:get'),
   listAchievements: () => ipcRenderer.invoke('achievements:list'),

@@ -88,6 +88,9 @@ function TodosPage(): JSX.Element {
 
   useEffect(() => {
     loadTodos()
+    // Cross-window sync: refresh when the tasks bar (or anyone) mutates todos.
+    const off = window.api.onTasksTodosChanged(() => { loadTodos() })
+    return () => { off() }
   }, [])
 
   const handleCreate = async () => {
